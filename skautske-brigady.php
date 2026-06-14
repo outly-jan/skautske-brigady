@@ -51,10 +51,9 @@ function sb_export_rocni_vypis_csv() {
         foreach ($brigady as $b) {
             $datum_raw = get_post_meta($b->ID, 'datum_brigady', true);
             if ($datum_raw && preg_match('/\b(19|20)\d{2}\b/', $datum_raw, $m) && intval($m[0]) === $rok) {
-                $h = get_post_meta($b->ID, 'odpracovano_' . $r->ID, true);
-                if ($h !== '' && $h !== null) {
-                    $n = max(1, intval(get_post_meta($b->ID, 'ucastnici_' . $r->ID, true)));
-                    $odpracovano += intval($h) * $n;
+                $celkem = sb_celkem_hodin($b->ID, $r->ID);
+                if ($celkem !== null) {
+                    $odpracovano += $celkem;
                 }
             }
         }
@@ -120,10 +119,15 @@ function sb_export_brigada_csv() {
     foreach ($rodiny as $r) {
         $pocet = intval(get_post_meta($brigada_id, 'ucastnici_' . $r->ID, true));
         if (!$pocet) continue;
-        $odp  = get_post_meta($brigada_id, 'odpracovano_' . $r->ID, true);
-        $h_os = ($odp !== '' && $odp !== null) ? intval($odp) : '';
-        $typ  = in_array($r->post_title, $walkin_jmena_csv, true) ? 'Walk-in' : 'Přihlášena';
-        $csv_radky[]          = [$r->post_title, $pocet, $h_os, ($h_os !== '') ? $h_os * $pocet : '', $typ];
+        $hodiny_osob_csv = get_post_meta($brigada_id, 'hodiny_osob_' . $r->ID, true);
+        $odp             = get_post_meta($brigada_id, 'odpracovano_' . $r->ID, true);
+        $typ             = in_array($r->post_title, $walkin_jmena_csv, true) ? 'Walk-in' : 'Přihlášena';
+        if (is_array($hodiny_osob_csv) && !empty($hodiny_osob_csv)) {
+            $csv_radky[] = [$r->post_title, $pocet, implode(', ', $hodiny_osob_csv) . ' h (ind.)', array_sum($hodiny_osob_csv), $typ];
+        } else {
+            $h_os = ($odp !== '' && $odp !== null) ? intval($odp) : '';
+            $csv_radky[] = [$r->post_title, $pocet, $h_os, ($h_os !== '') ? $h_os * $pocet : '', $typ];
+        }
         $jmena_prihlasenych[] = $r->post_title;
     }
     foreach ($walkins_csv as $w) {
@@ -147,6 +151,20 @@ function sb_export_brigada_csv() {
     exit;
 }
 add_action('init', 'sb_export_brigada_csv');
+
+// Vrátí celkový počet odpracovaných hodin rodiny na brigádě.
+// Podporuje starý formát (h/os. × počet) i nový (individuální hodiny na osobu).
+function sb_celkem_hodin($brigada_id, $rodina_id) {
+    $hodiny_osob = get_post_meta($brigada_id, 'hodiny_osob_' . $rodina_id, true);
+    if (is_array($hodiny_osob) && !empty($hodiny_osob)) {
+        return array_sum($hodiny_osob);
+    }
+    $h = get_post_meta($brigada_id, 'odpracovano_' . $rodina_id, true);
+    if ($h === '' || $h === null) return null;
+    $n = max(1, intval(get_post_meta($brigada_id, 'ucastnici_' . $rodina_id, true)));
+    return intval($h) * $n;
+}
+
 
 // SHORTCODE: hlavní rozhraní správce
  function sb_spravce_brigad_shortcode() {
@@ -557,15 +575,17 @@ if (isset($_POST['zobraz_ucast'])) {
         $pocet = intval(get_post_meta($id, 'ucastnici_' . $r->ID, true));
         if (!$pocet) continue;
         $prihlasenych_celkem += $pocet;
+        $hodiny_osob_dle = get_post_meta($id, 'hodiny_osob_' . $r->ID, true);
+        $hodiny_osob_dle = (is_array($hodiny_osob_dle) && !empty($hodiny_osob_dle)) ? $hodiny_osob_dle : null;
         $odp      = get_post_meta($id, 'odpracovano_' . $r->ID, true);
-        $h_os     = ($odp !== '' && $odp !== null) ? intval($odp) : null;
-        $celkem_h = ($h_os !== null) ? $h_os * $pocet : null;
-        if ($h_os !== null) {
+        $h_os     = ($hodiny_osob_dle === null && $odp !== '' && $odp !== null) ? intval($odp) : null;
+        $celkem_h = $hodiny_osob_dle !== null ? array_sum($hodiny_osob_dle) : ($h_os !== null ? $h_os * $pocet : null);
+        if ($celkem_h !== null) {
             $skutecne_celkem     += $pocet;
             $clovekhodiny_celkem += $celkem_h;
         }
         $typ = in_array($r->post_title, $walkin_jmena_dle, true) ? 'Walk-in' : 'Přihlášena';
-        $radky_ucastnici[] = ['jmeno' => $r->post_title, 'osob' => $pocet, 'h_os' => $h_os, 'celkem_h' => $celkem_h, 'typ' => $typ];
+        $radky_ucastnici[] = ['jmeno' => $r->post_title, 'osob' => $pocet, 'h_os' => $h_os, 'hodiny_osob' => $hodiny_osob_dle, 'celkem_h' => $celkem_h, 'typ' => $typ];
     }
 
     $jmena_prihlasenych_dle = array_column($radky_ucastnici, 'jmeno');
@@ -611,7 +631,13 @@ if (isset($_POST['zobraz_ucast'])) {
         echo "<table class='sb-table'>";
         echo "<tr><th>Rodina / jméno</th><th class='center'>Osob</th><th class='center'>Hod./os.</th><th class='center'>Celkem odpracováno</th><th>Způsob přihlášení</th></tr>";
         foreach ($radky_ucastnici as $row) {
-            $h_os_str   = $row['h_os'] !== null ? $row['h_os'] . ' h' : '<em style="color:#999;">nezadáno</em>';
+            if (!empty($row['hodiny_osob'])) {
+                $h_os_str = implode(', ', array_map(fn($h) => $h . ' h', $row['hodiny_osob']));
+            } elseif ($row['h_os'] !== null) {
+                $h_os_str = $row['h_os'] . ' h/os.';
+            } else {
+                $h_os_str = '<em style="color:#999;">nezadáno</em>';
+            }
             $celkem_str = $row['celkem_h'] !== null ? '<strong>' . $row['celkem_h'] . ' h</strong>' : '–';
             $typ_badge  = $row['typ'] === 'Walk-in'
                 ? "<span style='background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:3px;padding:1px 6px;font-size:12px;'>Walk-in</span>"
@@ -905,10 +931,15 @@ function sb_sprava_ucastniku() {
         } else {
             $brigada_id  = intval($_POST['brigada_id']);
             $rodina_id   = intval($_POST['rodina_id']);
-            $hodiny      = max(0, intval($_POST['novy_pocet_hodin']));
             $pocet_osob  = max(1, intval($_POST['novy_pocet_osob']));
-            update_post_meta($brigada_id, 'odpracovano_' . $rodina_id, $hodiny);
+            $hodiny_raw  = (isset($_POST['hodiny_osoba']) && is_array($_POST['hodiny_osoba']))
+                ? array_map(fn($h) => max(0, intval($h)), $_POST['hodiny_osoba'])
+                : [];
+            $hodiny_raw  = array_slice($hodiny_raw, 0, $pocet_osob);
+            while (count($hodiny_raw) < $pocet_osob) { $hodiny_raw[] = 0; }
             update_post_meta($brigada_id, 'ucastnici_' . $rodina_id, $pocet_osob);
+            update_post_meta($brigada_id, 'hodiny_osob_' . $rodina_id, $hodiny_raw);
+            delete_post_meta($brigada_id, 'odpracovano_' . $rodina_id);
             wp_cache_delete($brigada_id, 'post_meta');
             $vybrana_brigada_id = $brigada_id;
             $zprava .= sb_alert('Záznam byl uložen.');
@@ -924,6 +955,7 @@ function sb_sprava_ucastniku() {
             $brigada_id = intval($_POST['brigada_id']);
             $rodina_id  = intval($_POST['rodina_id']);
             delete_post_meta($brigada_id, 'odpracovano_' . $rodina_id);
+            delete_post_meta($brigada_id, 'hodiny_osob_' . $rodina_id);
             wp_cache_delete($brigada_id, 'post_meta');
             $vybrana_brigada_id = $brigada_id;
             $zprava .= sb_alert('Záznam o odpracovaných hodinách byl odebrán.');
@@ -1037,21 +1069,30 @@ function sb_sprava_ucastniku() {
         $sprava_radky = [];
 
         foreach ($rodiny as $r) {
-            $prihlaseno  = get_post_meta($id, 'ucastnici_' . $r->ID, true);
-            $odpracovano = get_post_meta($id, 'odpracovano_' . $r->ID, true);
-            if (!$prihlaseno && ($odpracovano === '' || $odpracovano === null)) continue;
-            $value    = ($odpracovano !== '' && $odpracovano !== null) ? intval($odpracovano) : '';
-            $celkem_h = ($value !== '' && $prihlaseno) ? $value * intval($prihlaseno) : '';
+            $prihlaseno    = get_post_meta($id, 'ucastnici_' . $r->ID, true);
+            $hodiny_osob_s = get_post_meta($id, 'hodiny_osob_' . $r->ID, true);
+            $hodiny_osob_s = (is_array($hodiny_osob_s) && !empty($hodiny_osob_s)) ? $hodiny_osob_s : null;
+            $odpracovano   = get_post_meta($id, 'odpracovano_' . $r->ID, true);
+            $ma_hodiny     = $hodiny_osob_s !== null || ($odpracovano !== '' && $odpracovano !== null);
+            if (!$prihlaseno && !$ma_hodiny) continue;
+            if ($hodiny_osob_s !== null) {
+                $celkem_h = array_sum($hodiny_osob_s);
+            } elseif ($odpracovano !== '' && $odpracovano !== null) {
+                $celkem_h = $prihlaseno ? intval($odpracovano) * intval($prihlaseno) : intval($odpracovano);
+            } else {
+                $celkem_h = '';
+            }
             $je_walkin = in_array($r->post_title, $walkin_jmena, true);
-            $osirely   = !$prihlaseno && $value !== '' && !$je_walkin;
+            $osirely   = !$prihlaseno && $ma_hodiny && !$je_walkin;
             $sprava_radky[] = [
-                'typ'       => 'rodina',
-                'jmeno'     => $r->post_title,
-                'rodina_id' => $r->ID,
-                'prihlaseno'=> $prihlaseno,
-                'value'     => $value,
-                'celkem_h'  => $celkem_h,
-                'osirely'   => $osirely,
+                'typ'        => 'rodina',
+                'jmeno'      => $r->post_title,
+                'rodina_id'  => $r->ID,
+                'prihlaseno' => $prihlaseno,
+                'celkem_h'   => $celkem_h,
+                'hodiny_osob' => $hodiny_osob_s,
+                'odpracovano' => $odpracovano, // starý formát, pro fallback v edit formuláři
+                'osirely'    => $osirely,
             ];
         }
 
@@ -1084,10 +1125,33 @@ function sb_sprava_ucastniku() {
 
         foreach ($sprava_radky as $radek) {
             if ($radek['typ'] === 'rodina') {
-                $osirely = $radek['osirely'];
-                $value   = $radek['value'];
-                $prihlaseno = $radek['prihlaseno'];
-                $celkem_h   = $radek['celkem_h'];
+                $osirely     = $radek['osirely'];
+                $prihlaseno  = $radek['prihlaseno'];
+                $celkem_h    = $radek['celkem_h'];
+                $hodiny_osob = $radek['hodiny_osob'];  // array nebo null
+                $pocet_v_form = max(1, intval($prihlaseno));
+
+                // Připrav pole hodin pro formulář (jeden vstup na brigádníka)
+                if ($hodiny_osob !== null) {
+                    $hodiny_form = array_values($hodiny_osob);
+                } elseif ($radek['odpracovano'] !== '' && $radek['odpracovano'] !== null) {
+                    // Starý formát: vyplň všechny vstupy stejnou hodnotou
+                    $hodiny_form = array_fill(0, $pocet_v_form, intval($radek['odpracovano']));
+                } else {
+                    $hodiny_form = array_fill(0, $pocet_v_form, 0);
+                }
+                $hodiny_form = array_slice($hodiny_form, 0, $pocet_v_form);
+                while (count($hodiny_form) < $pocet_v_form) { $hodiny_form[] = 0; }
+
+                // Zobraz souhrn hodin
+                if ($hodiny_osob !== null) {
+                    $hodiny_popis = '<strong>' . $celkem_h . ' h</strong> <span style="color:#999;font-size:12px;">(' . implode('+', $hodiny_osob) . ' h)</span>';
+                } elseif ($celkem_h !== '') {
+                    $hodiny_popis = '<strong>' . $celkem_h . ' h</strong>';
+                } else {
+                    $hodiny_popis = '<em>nezadáno</em>';
+                }
+
                 echo "<div class='sb-participant-item'" . ($osirely ? " style='border-color:#f0ad4e; background:#fffbf0;'" : "") . ">";
                 echo "<strong>" . esc_html($radek['jmeno']) . "</strong> &nbsp;";
                 if ($osirely) {
@@ -1096,7 +1160,7 @@ function sb_sprava_ucastniku() {
                     echo "<span style='font-size:12px; color:#4a6fa5; background:#dce8f8; border:1px solid #b0c4de; border-radius:3px; padding:1px 6px;'>👟 walk-in</span> &nbsp;";
                 }
                 echo "<span class='sb-participant-meta'>✅ Přihlášeno: " . ($prihlaseno ? intval($prihlaseno) . " osob" : "<em>–</em>") . " &nbsp;|&nbsp; ";
-                echo "🕒 Odpracováno: " . ($celkem_h !== '' ? "<strong>{$celkem_h} h</strong> <span style='color:#999;font-size:12px;'>({$value} h/os.)</span>" : ($value !== '' ? "<strong>{$value} h</strong>" : "<em>nezadáno</em>")) . "</span><br><br>";
+                echo "🕒 Odpracováno: " . $hodiny_popis . "</span><br><br>";
                 echo "<div class='sb-form-row' style='align-items:center; flex-wrap:wrap; gap:6px;'>";
                 echo "<form method='post' style='display:contents;'>";
                 wp_nonce_field('edit_ucastnik', '_wpnonce_edit_ucastnik');
@@ -1104,11 +1168,14 @@ function sb_sprava_ucastniku() {
                 echo "<input type='hidden' name='rodina_id'  value='" . esc_attr($radek['rodina_id']) . "'>";
                 echo "<span style='font-size:12px; color:#555;'>osob:</span>";
                 echo "<input type='number' name='novy_pocet_osob' value='" . intval($prihlaseno) . "' min='1' required style='width:60px; text-align:center;'>";
-                echo "<span style='font-size:12px; color:#555;'>h/os.:</span>";
-                echo "<input type='number' name='novy_pocet_hodin' value='" . esc_attr($value) . "' min='0' placeholder='hod.' required style='width:60px; text-align:center;'>";
+                for ($i = 0; $i < $pocet_v_form; $i++) {
+                    $label = $pocet_v_form > 1 ? "brigádník " . ($i + 1) . ":" : "hodin:";
+                    echo "<span style='font-size:12px; color:#555;'>" . esc_html($label) . "</span>";
+                    echo "<input type='number' name='hodiny_osoba[]' value='" . intval($hodiny_form[$i]) . "' min='0' required style='width:60px; text-align:center;'>";
+                }
                 echo "<input type='submit' name='edit_ucastnik' value='💾 Uložit' class='sb-btn sb-btn-primary sb-btn-sm'>";
                 echo "</form>";
-                if ($value !== '') {
+                if ($celkem_h !== '') {
                     echo "<form method='post' style='display:contents;' onsubmit='return confirm(\"Odebrat záznam?\")'>";
                     wp_nonce_field('delete_ucastnik', '_wpnonce_delete_ucastnik');
                     echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
@@ -1496,10 +1563,8 @@ function sb_rocni_vypis() {
                 }
                 if ($rok_v_datu !== $vybrany_rok) continue;
 
-                $hodiny = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
-                if ($hodiny !== '' && $hodiny !== null) {
-                    $n = max(1, intval(get_post_meta($b->ID, 'ucastnici_' . $rodina_id, true)));
-                    $celkem = intval($hodiny) * $n;
+                $celkem = sb_celkem_hodin($b->ID, $rodina_id);
+                if ($celkem !== null) {
                     $odpracovano += $celkem;
                     $d = $datum_raw ? date('j. n.', strtotime($datum_raw)) : '';
                     $brigady_seznam[] = esc_html($b->post_title) . ($d ? ' ' . $d : '') . ' (' . $celkem . ' h)';
@@ -1909,35 +1974,35 @@ function sb_moje_brigady_shortcode() {
     foreach ($brigady as $b) {
         $datum_raw           = get_post_meta($b->ID, 'datum_brigady', true);
         $datum_obj           = DateTime::createFromFormat('Y-m-d', $datum_raw, $tz);
-        $prihlaseno          = get_post_meta($b->ID, 'ucastnici_' . $rodina_id, true);
-        $odpracovane_hodiny  = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
+        $prihlaseno           = get_post_meta($b->ID, 'ucastnici_' . $rodina_id, true);
+        $celkem_hodin_brigady = sb_celkem_hodin($b->ID, $rodina_id);
 
         // Výpočet podle roku brigády
-        if ($odpracovane_hodiny !== '' && $odpracovane_hodiny !== null) {
+        if ($celkem_hodin_brigady !== null) {
             $rok_brigady = null;
             if ($datum_obj) {
                 $rok_brigady = intval($datum_obj->format('Y'));
             } elseif (preg_match('/\b(19|20)\d{2}\b/', $datum_raw, $m)) {
                 $rok_brigady = intval($m[0]);
             }
-            $n_osob = max(1, intval($prihlaseno));
             if ($rok_brigady === $rok_aktivni) {
-                $odpracovano_aktivni += intval($odpracovane_hodiny) * $n_osob;
+                $odpracovano_aktivni += $celkem_hodin_brigady;
             } elseif ($rok_druhy && $rok_brigady === $rok_druhy) {
-                $odpracovano_druhy += intval($odpracovane_hodiny) * $n_osob;
+                $odpracovano_druhy += $celkem_hodin_brigady;
             }
         }
 
         // Rozdělení na minulost/budoucnost
         if ($datum_obj && $datum_obj < $dnes) {
-            if ($odpracovane_hodiny) {
+            if ($celkem_hodin_brigady !== null) {
                 $n_osob_abs = max(1, intval($prihlaseno));
+                $hodiny_os_raw = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
                 $zaznamy_absolvovane[] = [
                     'nazev'      => $b->post_title,
                     'datum'      => $datum_raw,
-                    'hodiny'     => intval($odpracovane_hodiny),
+                    'hodiny'     => ($hodiny_os_raw !== '' && $hodiny_os_raw !== null) ? intval($hodiny_os_raw) : null,
                     'pocet_osob' => $n_osob_abs,
-                    'celkem_h'   => intval($odpracovane_hodiny) * $n_osob_abs,
+                    'celkem_h'   => $celkem_hodin_brigady,
                 ];
             }
         } else {
@@ -2092,7 +2157,7 @@ function sb_moje_brigady_shortcode() {
             echo "<td>" . esc_html($z['nazev']) . "</td>";
             echo "<td class='c'>" . $d_fmt . "</td>";
             echo "<td class='c'>" . intval($z['pocet_osob']) . "</td>";
-            echo "<td class='c'>" . intval($z['hodiny']) . " h</td>";
+            echo "<td class='c'>" . ($z['hodiny'] !== null ? intval($z['hodiny']) . ' h/os.' : '<span style="color:#999;">–</span>') . "</td>";
             echo "<td class='c'><strong>" . intval($z['celkem_h']) . " h</strong></td>";
             echo "</tr>";
         }
