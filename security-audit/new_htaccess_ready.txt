@@ -1,0 +1,111 @@
+php_flag log_errors on
+php_value error_log /zdata/html/skautchlumec.cz/public_html/wp-content/php_errors.log
+
+# =============================================================
+#  BEZPECNOSTNI KONFIGURACE - skautchlumec.cz
+#  Aktualizovano: 2026-06-18
+# =============================================================
+
+# Skryt verzi serveru
+ServerSignature Off
+
+# Zakazat vypis adresare
+Options -Indexes
+
+# --- Ochrana citlivych souboru ---
+<Files wp-config.php>
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<FilesMatch "^\.ht">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Skryt PHP error log pred verejnosti
+<Files "php_errors.log">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+<FilesMatch "(readme\.html|license\.txt|readme\.txt|wp-mail\.php|install\.php|upgrade\.php)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# --- Blokace XML-RPC (DDoS, brute-force) ---
+<Files xmlrpc.php>
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+# --- Blokace wp-login.php utoku ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Blokace spamu pres lostpassword (uz na webu)
+    RewriteCond %{QUERY_STRING} action=lostpassword [NC]
+    RewriteRule ^wp-login\.php$ - [F,L]
+
+    # Blokace otevrene registrace
+    RewriteCond %{QUERY_STRING} action=register [NC]
+    RewriteRule ^wp-login\.php$ - [F,L]
+</IfModule>
+
+# --- Blokace enumerace uzivatelu (?author=1) ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{QUERY_STRING} ^author=\d [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# --- Blokace PHP souboru v uploads (backdoory) ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^wp-content/uploads/.*\.(php|php3|php4|php5|php7|phtml|pht)$ - [F,L]
+</IfModule>
+
+# --- Blokace primych pristupu do wp-includes ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^wp-includes/[^/]+\.php$ - [F,L]
+    RewriteRule ^wp-includes/js/tinymce/langs/.+\.php - [F,L]
+    RewriteRule ^wp-includes/theme-compat/ - [F,L]
+</IfModule>
+
+# --- Blokace nebezpecnych scanner User-Agentu ---
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{HTTP_USER_AGENT} (acunetix|nikto|nessus|sqlmap|masscan|dirbuster|gobuster|wfuzz|havij|libwww-perl) [NC]
+    RewriteRule .* - [F,L]
+    RewriteCond %{HTTP_USER_AGENT} ^-?$
+    RewriteRule .* - [F,L]
+</IfModule>
+
+# --- HTTP bezpecnostni hlavicky ---
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header unset X-Powered-By
+</IfModule>
+
+# This file was updated by Duplicator on 2025-09-08 17:20:09.
+# See the original_files_ folder for the original source_site_htaccess file.
+# BEGIN WordPress
+# Direktivy (radky) mezi "BEGIN WordPress" a "END WordPress" jsou
+# dynamicky generovane a mely by byt upravovany pouze pomocí filtru WordPressu.
+# Veskeré zmeny direktiv mezi temito znackami budou prepsany.
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+
+# END WordPress
