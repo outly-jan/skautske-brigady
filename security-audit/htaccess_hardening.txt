@@ -1,0 +1,292 @@
+# =============================================================
+#  Hardened .htaccess for skautchlumec.cz
+#  WordPress Security Configuration
+#
+#  INSTRUCTIONS:
+#  1. Back up your current .htaccess first!
+#  2. Place in public_html root (same directory as wp-login.php)
+#  3. Test your site immediately after applying
+#  4. The standard WP block is marked clearly below
+#
+#  Apache 2.2 / 2.4 compatible (mod_rewrite required)
+# =============================================================
+
+
+# =============================================================
+#  BLOCK 1: Disable Server Signature (information disclosure)
+# =============================================================
+ServerSignature Off
+
+
+# =============================================================
+#  BLOCK 2: Disable Directory Browsing
+# =============================================================
+Options -Indexes
+
+
+# =============================================================
+#  BLOCK 3: Block access to sensitive files
+# =============================================================
+
+# Block wp-config.php
+<Files wp-config.php>
+    Order Allow,Deny
+    Deny from all
+    # Apache 2.4 syntax (use if above doesn't work):
+    # Require all denied
+</Files>
+
+# Block .htaccess and .htpasswd from direct access
+<FilesMatch "^\.ht">
+    Order Allow,Deny
+    Deny from all
+    # Require all denied
+</FilesMatch>
+
+# Block other sensitive files
+<FilesMatch "(wp-config\.php|wp-config-sample\.php|readme\.html|license\.txt|readme\.txt|wp-mail\.php|install\.php|upgrade\.php)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+
+# Block PHP error logs
+<Files "php_errorlog">
+    Order Allow,Deny
+    Deny from all
+</Files>
+
+
+# =============================================================
+#  BLOCK 4: Block XML-RPC completely
+#  (prevents DDoS amplification, brute-force via xmlrpc)
+#  If you need JetPack or app remote access, comment this out
+#  and use the pingback-only block in BLOCK 5 instead.
+# =============================================================
+<Files xmlrpc.php>
+    Order Allow,Deny
+    Deny from all
+    # Require all denied
+</Files>
+
+
+# =============================================================
+#  BLOCK 5: Block XML-RPC Pingback only (alternative to BLOCK 4)
+#  Uncomment ONLY if you need xmlrpc for JetPack/apps
+#  but want to stop pingback DDoS amplification
+# =============================================================
+# <IfModule mod_rewrite.c>
+#     RewriteEngine On
+#     RewriteCond %{REQUEST_URI} ^/xmlrpc\.php [NC]
+#     RewriteCond %{THE_REQUEST} "pingback" [NC]
+#     RewriteRule .* - [F,L]
+# </IfModule>
+
+
+# =============================================================
+#  BLOCK 6: Block wp-login.php spam/bruteforce vectors
+#  (includes the lostpassword spam fix already on this site)
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block password reset spam (lostpassword action) - ALREADY IN PLACE
+    # Kept here for documentation. If using both, only one instance needed.
+    RewriteCond %{QUERY_STRING} action=lostpassword [NC]
+    RewriteRule ^wp-login\.php$ - [F,L]
+
+    # Block register action (if open registration not needed)
+    RewriteCond %{QUERY_STRING} action=register [NC]
+    RewriteRule ^wp-login\.php$ - [F,L]
+</IfModule>
+
+# Optionally: restrict wp-login.php to specific IPs only
+# (Most secure option - uncomment and add your IP)
+# <Files wp-login.php>
+#     Order Deny,Allow
+#     Deny from all
+#     Allow from YOUR.IP.ADDRESS.HERE
+#     Allow from YOUR.SECOND.IP.HERE
+# </Files>
+
+
+# =============================================================
+#  BLOCK 7: Block User Enumeration via ?author=N
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block author enumeration via query string
+    RewriteCond %{QUERY_STRING} ^author=\d [NC]
+    RewriteRule .* - [F,L]
+
+    # Block /author/username/ URL path enumeration
+    # WARNING: Comment this out if you use author archive pages
+    # RewriteRule ^author/(.+)$ - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 8: Block PHP execution in uploads directory
+#  CRITICAL - prevents backdoors uploaded via forms/plugins
+# =============================================================
+# NOTE: This rule applies to the ROOT .htaccess. For belt-and-suspenders,
+# ALSO create a separate .htaccess in wp-content/uploads/ with:
+#
+#   <FilesMatch "\.(php|php3|php4|php5|php7|phtml|pht|shtml|pl|cgi)$">
+#       Order Allow,Deny
+#       Deny from all
+#   </FilesMatch>
+#
+# The following rule handles it from the root:
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^wp-content/uploads/.*\.(php|php3|php4|php5|php7|phtml|pht)$ - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 9: Block access to wp-includes PHP files
+#  (Legitimate requests to wp-includes are handled by WP core)
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteRule ^wp-includes/[^/]+\.php$ - [F,L]
+
+    # Also block direct access to wp-includes subdirs
+    RewriteRule ^wp-includes/js/tinymce/langs/.+\.php - [F,L]
+    RewriteRule ^wp-includes/theme-compat/ - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 10: Block common malicious scanner User Agents
+#  These are commonly used by automated vulnerability scanners.
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{HTTP_USER_AGENT} (acunetix|nikto|nessus|w3af|sqlmap|masscan|nmap|openvas|dirbuster|gobuster|wfuzz|fuzz|scanner|zgrab) [NC]
+    RewriteRule .* - [F,L]
+
+    RewriteCond %{HTTP_USER_AGENT} (havij|pangolin|libwww-perl|wget|python-httpx|python-requests|curl/[0-9]) [NC]
+    RewriteRule .* - [F,L]
+
+    # Block empty user agents (many bots send no UA)
+    RewriteCond %{HTTP_USER_AGENT} ^-?$
+    RewriteRule .* - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 11: Block SQL injection patterns in query strings
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{QUERY_STRING} (union.*select|select.*from|insert.*into|drop.*table|delete.*from) [NC]
+    RewriteRule .* - [F,L]
+
+    RewriteCond %{QUERY_STRING} (benchmark\(|sleep\(|load_file\(|into.*outfile) [NC]
+    RewriteRule .* - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 12: Block common WordPress attack paths
+# =============================================================
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Block direct access to theme/plugin files that shouldn't be accessed directly
+    RewriteRule wp-content/themes/[^/]+/[^/]+\.php$ - [F,L]
+
+    # Block double extensions (file.php.jpg trick)
+    RewriteRule \.(php|phtml|pht)\. - [F,L]
+</IfModule>
+
+
+# =============================================================
+#  BLOCK 13: Limit login attempt rate
+#  NOTE: .htaccess cannot do true rate limiting.
+#  For actual rate limiting, use one of:
+#    - mod_ratelimit (Apache module, server-level config)
+#    - Fail2ban (server-level, monitors logs)
+#    - Cloudflare WAF rate limiting rules
+#    - A WordPress plugin like Limit Login Attempts Reloaded
+#    - WP-Cerber Security plugin
+#  The below blocks are not true rate limits but add friction:
+# =============================================================
+
+# Add a CAPTCHA/challenge via a security plugin for /wp-login.php
+# This .htaccess comment serves as a reminder to configure
+# server-level rate limiting through hosting panel or fail2ban.
+
+
+# =============================================================
+#  BLOCK 14: Prevent PHP information disclosure
+# =============================================================
+<IfModule mod_headers.c>
+    Header unset X-Powered-By
+    Header unset Server
+</IfModule>
+
+# Prevent exposure of PHP version via URL tricks
+<FilesMatch "\.php$">
+    Header unset X-Powered-By
+</FilesMatch>
+
+
+# =============================================================
+#  BLOCK 15: Security headers
+# =============================================================
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # Prevent MIME type sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # XSS protection (legacy browsers)
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Referrer policy
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Remove WordPress version from headers
+    Header unset X-Powered-By
+</IfModule>
+
+
+# =============================================================
+#  STANDARD WORDPRESS REWRITE RULES
+#  (Keep this at the bottom, do not modify)
+# =============================================================
+# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+
+
+# =============================================================
+#  ADDITIONAL: Separate .htaccess for wp-content/uploads/
+#  Create this as a SEPARATE FILE at:
+#  public_html/wp-content/uploads/.htaccess
+# =============================================================
+#
+# <FilesMatch "\.(php|php3|php4|php5|php7|phtml|pht|shtml|pl|cgi|exe|sh|bash)$">
+#     Order Allow,Deny
+#     Deny from all
+# </FilesMatch>
+#
+# Options -ExecCGI
+# AddType text/plain .php .php3 .php4 .php5 .php7 .phtml .pht
+#
+# =============================================================
