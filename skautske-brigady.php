@@ -1229,7 +1229,7 @@ function sb_sprava_ucastniku() {
                 }
                 echo "<input type='submit' name='edit_ucastnik' value='💾 Uložit' class='sb-btn sb-btn-primary sb-btn-sm'>";
                 echo "</form>";
-                if ($celkem_h !== '') {
+                if ($osirely) {
                     echo "<form method='post' style='display:contents;' onsubmit='return confirm(\"Odebrat záznam?\")'>";
                     wp_nonce_field('delete_ucastnik', '_wpnonce_delete_ucastnik');
                     echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
