@@ -1971,7 +1971,7 @@ function sb_moje_brigady_shortcode() {
                     update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
                     wp_cache_delete($id, 'post_meta');
                     sb_notify_prihlaseni($id, $rodina_id, $pocet);
-                    sb_notify_spravci_zmena($id);
+                    sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' se přihlásila (' . $pocet . ' ' . ($pocet === 1 ? 'osoba' : ($pocet <= 4 ? 'osoby' : 'osob')) . ').');
                     $zprava = "<p style='color:green;'>Byli jste přihlášeni na brigádu.</p>";
                 }
             }
@@ -1982,7 +1982,7 @@ function sb_moje_brigady_shortcode() {
                 update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
                 wp_cache_delete($id, 'post_meta');
                 sb_notify_zmena($id, $rodina_id, $pocet);
-                sb_notify_spravci_zmena($id);
+                sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' změnila počet účastníků na ' . $pocet . '.');
                 $zprava = "<p style='color:green;'>Přihláška byla upravena.</p>";
             }
 
@@ -1991,7 +1991,7 @@ function sb_moje_brigady_shortcode() {
                 delete_post_meta($id, 'ucastnici_' . $rodina_id);
                 wp_cache_delete($id, 'post_meta');
                 sb_notify_odhlaseni($id, $rodina_id);
-                sb_notify_spravci_zmena($id);
+                sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' se odhlásila.');
                 $zprava = "<p style='color:orange;'>Byli jste odhlášeni z brigády.</p>";
             }
         }
@@ -2399,7 +2399,7 @@ function sb_prehled_brigad_frontend() {
                             update_post_meta($brigada_id, $meta_key, $pocet_osob);
                             wp_cache_delete($brigada_id, 'post_meta');
                             sb_notify_prihlaseni($brigada_id, $rodina_id, $pocet_osob);
-                            sb_notify_spravci_zmena($brigada_id);
+                            sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' se přihlásila (' . $pocet_osob . ' ' . ($pocet_osob === 1 ? 'osoba' : ($pocet_osob <= 4 ? 'osoby' : 'osob')) . ').');
                             $zprava = "<p style='color:green;'>Přihlášení proběhlo v pořádku.</p>";
                         }
                     }
@@ -2410,7 +2410,7 @@ function sb_prehled_brigad_frontend() {
                         update_post_meta($brigada_id, $meta_key, $pocet_osob);
                         wp_cache_delete($brigada_id, 'post_meta');
                         sb_notify_zmena($brigada_id, $rodina_id, $pocet_osob);
-                        sb_notify_spravci_zmena($brigada_id);
+                        sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' změnila počet účastníků na ' . $pocet_osob . '.');
                         $zprava = "<p style='color:green;'>Změna byla uložena.</p>";
                     }
                 }
@@ -2418,7 +2418,7 @@ function sb_prehled_brigad_frontend() {
                 delete_post_meta($brigada_id, $meta_key);
                 wp_cache_delete($brigada_id, 'post_meta');
                 sb_notify_odhlaseni($brigada_id, $rodina_id);
-                sb_notify_spravci_zmena($brigada_id);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' se odhlásila.');
                 $zprava = "<p style='color:green;'>Byli jste odhlášeni z brigády.</p>";
             }
         }
@@ -2591,10 +2591,11 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
             $uz_prihlaseno = $pocet;
             if ($jiz_prihlasen) {
                 sb_notify_zmena($brigada_id, $moje_rodina->ID, $pocet);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' změnila počet účastníků na ' . $pocet . '.');
             } else {
                 sb_notify_prihlaseni($brigada_id, $moje_rodina->ID, $pocet);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' se přihlásila (' . $pocet . ' ' . ($pocet === 1 ? 'osoba' : ($pocet <= 4 ? 'osoby' : 'osob')) . ').');
             }
-            sb_notify_spravci_zmena($brigada_id);
             $zprava = ''; // hlášku ukáže šedý box níže
         }
     }
@@ -2608,7 +2609,7 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
             wp_cache_delete($brigada_id, 'post_meta');
             $uz_prihlaseno = null;
             sb_notify_odhlaseni($brigada_id, $moje_rodina->ID);
-            sb_notify_spravci_zmena($brigada_id);
+            sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' se odhlásila.');
             $zprava = "<p style='color:orange;'>Vaše rodina byla odhlášena z brigády.</p>";
         }
     }
@@ -2815,7 +2816,7 @@ function sb_notify_zmena($brigada_id, $rodina_id, $pocet) {
 }
 
 // --- Notifikace správcům: změna přihlášek ---
-function sb_notify_spravci_zmena($brigada_id) {
+function sb_notify_spravci_zmena($brigada_id, $zmena = '') {
     $datum = get_post_meta($brigada_id, 'datum_brigady', true);
     if ($datum && strtotime($datum) - time() > 7 * DAY_IN_SECONDS) return;
     $emails = sb_get_spravce_emails();
@@ -2823,7 +2824,8 @@ function sb_notify_spravci_zmena($brigada_id) {
     $info = sb_get_brigada_info($brigada_id);
     list($prehled, $celkem) = sb_sestavit_prehled_prihlasenych($brigada_id);
     $subject = 'Změna přihlášek – ' . $info['nazev'] . ' (' . $info['datum'] . ')';
-    $body = "Právě došlo ke změně přihlášek na brigádu {$info['nazev']}.\n\n"
+    $zmena_radek = $zmena ? "🔔 Co se změnilo: {$zmena}\n\n" : '';
+    $body = $zmena_radek
         . "Aktuální stav přihlášených rodin:\n{$prehled}\n\n"
         . "Celkem přihlášeno: {$celkem} " . ($celkem === 1 ? 'osoba' : ($celkem <= 4 ? 'osoby' : 'osob')) . "\n\n"
         . "📌 Brigáda: {$info['nazev']}\n"
