@@ -19,6 +19,8 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./
           server-dir: /public_html/wp-content/plugins/skautske-brigady/
+          protocol: ftp
+          port: 21
           exclude: |
             **/.git*
             **/.git*/**
