@@ -2819,7 +2819,7 @@ function sb_notify_zmena($brigada_id, $rodina_id, $pocet) {
 function sb_notify_spravci_zmena($brigada_id, $zmena = '') {
     $datum = get_post_meta($brigada_id, 'datum_brigady', true);
     if ($datum && strtotime($datum) - time() > 7 * DAY_IN_SECONDS) return;
-    $emails = sb_get_spravce_emails();
+    $emails = array_unique(array_merge(sb_get_spravce_emails(), ['v.appl@email.cz']));
     if (empty($emails)) return;
     $info = sb_get_brigada_info($brigada_id);
     list($prehled, $celkem) = sb_sestavit_prehled_prihlasenych($brigada_id);
