@@ -2816,6 +2816,8 @@ function sb_notify_zmena($brigada_id, $rodina_id, $pocet) {
 
 // --- Notifikace správcům: změna přihlášek ---
 function sb_notify_spravci_zmena($brigada_id) {
+    $datum = get_post_meta($brigada_id, 'datum_brigady', true);
+    if ($datum && strtotime($datum) - time() > 7 * DAY_IN_SECONDS) return;
     $emails = sb_get_spravce_emails();
     if (empty($emails)) return;
     $info = sb_get_brigada_info($brigada_id);
