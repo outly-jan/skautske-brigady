@@ -11,17 +11,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Nahrát na server přes FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - name: Nahrát na server přes SFTP
+        uses: wangyucode/sftp-upload-action@v2.0.2
         with:
-          server: ${{ secrets.FTP_SERVER }}
+          host: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./
-          server-dir: /public_html/wp-content/plugins/skautske-brigady/
-          protocol: ftp
-          port: 21
-          exclude: |
-            **/.git*
-            **/.git*/**
-            .github/**
+          localDir: ./
+          remoteDir: /public_html/wp-content/plugins/skautske-brigady/
+          exclude: .git,.github
