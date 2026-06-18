@@ -197,7 +197,7 @@ if (array_intersect($roles, $allowed_limited)) {
             $aktivni_sekce = 'ucastnici_dle';
         }
         // Správa účastníků
-        if (isset($_POST['zobraz_ucastniky']) || isset($_POST['edit_ucastnik']) || isset($_POST['delete_ucastnik'])) {
+        if (isset($_POST['zobraz_ucastniky']) || isset($_POST['edit_ucastnik']) || isset($_POST['delete_ucastnik']) || isset($_POST['odhlasit_ucastnika'])) {
             $aktivni_sekce = 'upravit_ucastniky';
         }
         // Vytvořit rodinu
@@ -1000,6 +1000,23 @@ function sb_sprava_ucastniku() {
         }
     }
 
+    // Odhlášení rodiny z brigády (smaže přihlášení i hodiny)
+    if (isset($_POST['odhlasit_ucastnika'])) {
+        if (!isset($_POST['_wpnonce_odhlasit_ucastnika']) || !wp_verify_nonce($_POST['_wpnonce_odhlasit_ucastnika'], 'odhlasit_ucastnika')) {
+            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+        } else {
+            $brigada_id = intval($_POST['brigada_id']);
+            $rodina_id  = intval($_POST['rodina_id']);
+            delete_post_meta($brigada_id, 'ucastnici_' . $rodina_id);
+            delete_post_meta($brigada_id, 'odpracovano_' . $rodina_id);
+            delete_post_meta($brigada_id, 'hodiny_osob_' . $rodina_id);
+            wp_cache_delete($brigada_id, 'post_meta');
+            $vybrana_brigada_id = $brigada_id;
+            $zprava .= sb_alert('Rodina byla odhlášena z brigády.');
+            $zprava .= "<script>setTimeout(function() { sbShowSection('upravit_ucastniky'); }, 100);</script>";
+        }
+    }
+
     // Přidání walk-in účastníka
     if (isset($_POST['pridat_walkin'])) {
         if (!isset($_POST['_wpnonce_walkin']) || !wp_verify_nonce($_POST['_wpnonce_walkin'], 'sprava_walkin')) {
@@ -1218,6 +1235,14 @@ function sb_sprava_ucastniku() {
                     echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
                     echo "<input type='hidden' name='rodina_id'  value='" . esc_attr($radek['rodina_id']) . "'>";
                     echo "<input type='submit' name='delete_ucastnik' value='🗑️ Odebrat záznam' class='sb-btn sb-btn-danger sb-btn-sm'>";
+                    echo "</form>";
+                }
+                if ($prihlaseno && !$osirely) {
+                    echo "<form method='post' style='display:contents;' onsubmit='return confirm(\"Odhlásit rodinu z brigády? Smažou se i případné hodiny.\")'>";
+                    wp_nonce_field('odhlasit_ucastnika', '_wpnonce_odhlasit_ucastnika');
+                    echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
+                    echo "<input type='hidden' name='rodina_id'  value='" . esc_attr($radek['rodina_id']) . "'>";
+                    echo "<input type='submit' name='odhlasit_ucastnika' value='🚫 Odhlásit z brigády' class='sb-btn sb-btn-danger sb-btn-sm'>";
                     echo "</form>";
                 }
                 echo "</div>";
