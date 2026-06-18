@@ -707,6 +707,27 @@ if (!array_intersect($roles, ['administrator', 'spravce_brigad'])) {
 
     $zprava = '';
     $vybrana_id = isset($_POST['vybrana_brigada']) ? intval($_POST['vybrana_brigada']) : 0;
+    $duplikat_data = null;
+
+    // Duplikace brigády – předvyplní formulář nové brigády
+    if (isset($_POST['duplikovat_brigadu'])) {
+        if (!isset($_POST['_wpnonce_duplikovat']) || !wp_verify_nonce($_POST['_wpnonce_duplikovat'], 'duplikovat_brigadu')) {
+            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+        } else {
+            $zdroj_id = intval($_POST['zdroj_brigada_id']);
+            $duplikat_data = [
+                'nazev'    => get_the_title($zdroj_id),
+                'datum'    => '',
+                'cas'      => get_post_meta($zdroj_id, 'cas_brigady', true),
+                'misto'    => get_post_meta($zdroj_id, 'misto_konani', true),
+                'delka'    => get_post_meta($zdroj_id, 'delka_brigady', true),
+                'pocet'    => get_post_meta($zdroj_id, 'pozadovany_pocet', true),
+                'vhodne'   => get_post_meta($zdroj_id, 'vhodne_pro', true),
+                'poznamka' => get_post_meta($zdroj_id, 'poznamka_brigady', true),
+            ];
+            $vybrana_id = $zdroj_id;
+        }
+    }
 
    // Uložení úprav
 if (isset($_POST['ulozit_brigadu'])) {
@@ -877,32 +898,45 @@ if (isset($_POST['nova_brigada'])) {
         echo "<input type='submit' name='ulozit_brigadu' value='💾 Uložit změny' class='sb-btn sb-btn-primary'>";
         echo "</div></form>";
 
-        echo "<form method='post' onsubmit='return confirm(\"Opravdu chceš smazat brigádu?\")' style='margin-top:14px;'>";
+        echo "<div class='sb-btn-row' style='margin-top:14px; gap:8px;'>";
+        echo "<form method='post' style='display:inline;'>";
+        wp_nonce_field('duplikovat_brigadu', '_wpnonce_duplikovat');
+        echo "<input type='hidden' name='zdroj_brigada_id' value='{$b->ID}'>";
+        echo "<input type='hidden' name='vybrana_brigada' value='{$b->ID}'>";
+        echo "<input type='submit' name='duplikovat_brigadu' value='📋 Duplikovat brigádu' class='sb-btn sb-btn-secondary'>";
+        echo "</form>";
+        echo "<form method='post' onsubmit='return confirm(\"Opravdu chceš smazat brigádu?\")' style='display:inline;'>";
         wp_nonce_field('smazat_brigadu', '_wpnonce_smazat_brigadu');
         echo "<input type='hidden' name='smazat_brigadu' value='{$b->ID}'>";
         echo "<input type='submit' value='🗑️ Smazat brigádu' class='sb-btn sb-btn-danger'>";
         echo "</form>";
         echo "</div>";
+        echo "</div>";
     }
 
-    // Formulář pro vytvoření nové brigády (skrytý)
-    echo "<button onclick=\"document.getElementById('nova-brigada-form').style.display='block'; this.style.display='none';\" class='sb-btn sb-btn-success' style='margin-top:14px;'>➕ Vytvořit novou brigádu</button>";
-    echo "<div id='nova-brigada-form' style='display:none; margin-top:16px;'>";
+    // Formulář pro vytvoření nové brigády (skrytý, nebo předvyplněný při duplikaci)
+    $nova_form_display = $duplikat_data !== null ? 'block' : 'none';
+    $nova_btn_display  = $duplikat_data !== null ? 'none' : 'inline-block';
+    $d = $duplikat_data ?? ['nazev' => '', 'datum' => '', 'cas' => '', 'misto' => '', 'delka' => '', 'pocet' => '', 'vhodne' => '', 'poznamka' => ''];
+    $nova_titulek = $duplikat_data !== null ? '📋 Duplikát brigády – upravte údaje a uložte' : '➕ Nová brigáda';
+
+    echo "<button id='btn-nova-brigada' onclick=\"document.getElementById('nova-brigada-form').style.display='block'; this.style.display='none';\" class='sb-btn sb-btn-success' style='margin-top:14px; display:{$nova_btn_display};'>➕ Vytvořit novou brigádu</button>";
+    echo "<div id='nova-brigada-form' style='display:{$nova_form_display}; margin-top:16px;'>";
     echo "<div class='sb-card'>";
-    echo "<h4 class='sb-card-title'>➕ Nová brigáda</h4>";
+    echo "<h4 class='sb-card-title'>" . esc_html($nova_titulek) . "</h4>";
     echo "<form method='post'>";
     wp_nonce_field('nova_brigada', '_wpnonce_nova_brigada');
 
-    echo "<div class='sb-form-group'><label>Název brigády:</label><input type='text' name='novy_nazev_brigady' required></div>";
+    echo "<div class='sb-form-group'><label>Název brigády:</label><input type='text' name='novy_nazev_brigady' value='" . esc_attr($d['nazev']) . "' required></div>";
     echo "<div class='sb-form-group'><label>Datum brigády:</label>";
-    echo "<span class='sb-form-inline'><input type='date' name='novy_datum_brigady' required style='width:160px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_datum_predbezne'> předběžně</label></span></div>";
+    echo "<span class='sb-form-inline'><input type='date' name='novy_datum_brigady' value='" . esc_attr($d['datum']) . "' required style='width:160px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_datum_predbezne'> předběžně</label></span></div>";
     echo "<div class='sb-form-group'><label>Čas konání:</label>";
-    echo "<span class='sb-form-inline'><input type='text' name='novy_cas_brigady' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_cas_predbezne'> předběžně</label></span></div>";
-    echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='novy_misto_konani'></div>";
-    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady'></div>";
-    echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='novy_pozadovany_pocet' min='1' style='width:90px;'></div>";
-    echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='novy_vhodne_pro'></div>";
-    echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='novy_poznamka_brigady' rows='3'></textarea></div>";
+    echo "<span class='sb-form-inline'><input type='text' name='novy_cas_brigady' value='" . esc_attr($d['cas']) . "' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_cas_predbezne'> předběžně</label></span></div>";
+    echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='novy_misto_konani' value='" . esc_attr($d['misto']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady' value='" . esc_attr($d['delka']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='novy_pozadovany_pocet' value='" . esc_attr($d['pocet']) . "' min='1' style='width:90px;'></div>";
+    echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='novy_vhodne_pro' value='" . esc_attr($d['vhodne']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='novy_poznamka_brigady' rows='3'>" . esc_textarea($d['poznamka']) . "</textarea></div>";
     echo "<div class='sb-btn-row'><input type='submit' name='nova_brigada' value='💾 Vytvořit brigádu' class='sb-btn sb-btn-primary'></div>";
     echo "</form>";
     echo "</div></div>";
