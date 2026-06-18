@@ -922,6 +922,9 @@ if (isset($_POST['nova_brigada'])) {
 
     echo "<button id='btn-nova-brigada' onclick=\"document.getElementById('nova-brigada-form').style.display='block'; this.style.display='none';\" class='sb-btn sb-btn-success' style='margin-top:14px; display:{$nova_btn_display};'>➕ Vytvořit novou brigádu</button>";
     echo "<div id='nova-brigada-form' style='display:{$nova_form_display}; margin-top:16px;'>";
+    if ($duplikat_data !== null) {
+        echo "<script>document.addEventListener('DOMContentLoaded', function() { document.getElementById('nova-brigada-form').scrollIntoView({behavior:'smooth'}); });</script>";
+    }
     echo "<div class='sb-card'>";
     echo "<h4 class='sb-card-title'>" . esc_html($nova_titulek) . "</h4>";
     echo "<form method='post'>";
