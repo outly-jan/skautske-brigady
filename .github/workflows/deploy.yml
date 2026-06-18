@@ -15,6 +15,7 @@ jobs:
         uses: wangyucode/sftp-upload-action@v2.0.2
         with:
           host: ${{ secrets.FTP_SERVER }}
+          port: 222
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           localDir: ./
