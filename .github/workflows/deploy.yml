@@ -1,4 +1,4 @@
-name: Deploy přes FTP
+name: Deploy – trigger webhook
 
 on:
   push:
@@ -9,15 +9,11 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Nahrát na server přes SFTP
-        uses: wangyucode/sftp-upload-action@v2.0.2
-        with:
-          host: ${{ secrets.FTP_SERVER }}
-          port: 222
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          localDir: ./
-          remoteDir: /public_html/wp-content/plugins/skautske-brigady/
-          exclude: .git,.github
+      - name: Zavolej deploy webhook na serveru
+        run: |
+          curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "X-Hub-Signature-256: sha256=$(echo -n '{}' | openssl dgst -sha256 -hmac '${{ secrets.DEPLOY_SECRET }}' | sed 's/.*= //')" \
+            -d '{}' \
+            https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php
