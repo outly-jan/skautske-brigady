@@ -1896,11 +1896,22 @@ function sb_moje_brigady_shortcode() {
             if (isset($_POST['prihlasit_brigadu']) && intval($_POST['brigada_id'])) {
                 $id    = intval($_POST['brigada_id']);
                 $pocet = max(1, intval($_POST['pocet_osob']));
-                update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
-                wp_cache_delete($id, 'post_meta');
-                sb_notify_prihlaseni($id, $rodina_id, $pocet);
-                sb_notify_spravci_zmena($id);
-                $zprava = "<p style='color:green;'>Byli jste přihlášeni na brigádu.</p>";
+                $potrebujeme = intval(get_post_meta($id, 'pozadovany_pocet', true));
+                $celkem_uz = 0;
+                foreach (get_post_meta($id) as $mk => $mv) {
+                    if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                        $celkem_uz += intval($mv[0]);
+                    }
+                }
+                if ($potrebujeme > 0 && $celkem_uz + $pocet > $potrebujeme) {
+                    $zprava = "<p style='color:red;'>Brigáda je již plná – přihlášeno $celkem_uz z $potrebujeme míst.</p>";
+                } else {
+                    update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
+                    wp_cache_delete($id, 'post_meta');
+                    sb_notify_prihlaseni($id, $rodina_id, $pocet);
+                    sb_notify_spravci_zmena($id);
+                    $zprava = "<p style='color:green;'>Byli jste přihlášeni na brigádu.</p>";
+                }
             }
 
             if (isset($_POST['upravit_brigadu']) && intval($_POST['brigada_id'])) {
@@ -2313,11 +2324,22 @@ function sb_prehled_brigad_frontend() {
                     if ($pocet_osob < 1) {
                         $zprava = "<p style='color:red;'>Zadejte prosím počet osob alespoň 1.</p>";
                     } else {
-                        update_post_meta($brigada_id, $meta_key, $pocet_osob);
-                        wp_cache_delete($brigada_id, 'post_meta');
-                        sb_notify_prihlaseni($brigada_id, $rodina_id, $pocet_osob);
-                        sb_notify_spravci_zmena($brigada_id);
-                        $zprava = "<p style='color:green;'>Přihlášení proběhlo v pořádku.</p>";
+                        $potrebujeme2 = intval(get_post_meta($brigada_id, 'pozadovany_pocet', true));
+                        $celkem_uz2 = 0;
+                        foreach (get_post_meta($brigada_id) as $mk => $mv) {
+                            if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                                $celkem_uz2 += intval($mv[0]);
+                            }
+                        }
+                        if ($potrebujeme2 > 0 && $celkem_uz2 + $pocet_osob > $potrebujeme2) {
+                            $zprava = "<p style='color:red;'>Brigáda je již plná – přihlášeno $celkem_uz2 z $potrebujeme2 míst.</p>";
+                        } else {
+                            update_post_meta($brigada_id, $meta_key, $pocet_osob);
+                            wp_cache_delete($brigada_id, 'post_meta');
+                            sb_notify_prihlaseni($brigada_id, $rodina_id, $pocet_osob);
+                            sb_notify_spravci_zmena($brigada_id);
+                            $zprava = "<p style='color:green;'>Přihlášení proběhlo v pořádku.</p>";
+                        }
                     }
                 } else { // úprava
                     if ($pocet_osob < 0) {
