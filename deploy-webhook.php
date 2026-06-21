@@ -17,4 +17,7 @@ if (!$content || strlen($content) < 10000) {
 }
 
 file_put_contents(__DIR__ . '/skautske-brigady.php', $content);
+if (function_exists('opcache_invalidate')) {
+    opcache_invalidate(__DIR__ . '/skautske-brigady.php', true);
+}
 echo 'OK – deployed ' . strlen($content) . ' bytes at ' . date('Y-m-d H:i:s');
