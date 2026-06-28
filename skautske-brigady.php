@@ -2077,13 +2077,15 @@ function sb_moje_brigady_shortcode() {
         if ($datum_obj && $datum_obj < $dnes) {
             if ($celkem_hodin_brigady !== null) {
                 $n_osob_abs = max(1, intval($prihlaseno));
-                $hodiny_os_raw = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
+                $hodiny_os_raw  = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
+                $hodiny_osob_arr = get_post_meta($b->ID, 'hodiny_osob_' . $rodina_id, true);
                 $zaznamy_absolvovane[] = [
-                    'nazev'      => $b->post_title,
-                    'datum'      => $datum_raw,
-                    'hodiny'     => ($hodiny_os_raw !== '' && $hodiny_os_raw !== null) ? intval($hodiny_os_raw) : null,
-                    'pocet_osob' => $n_osob_abs,
-                    'celkem_h'   => $celkem_hodin_brigady,
+                    'nazev'       => $b->post_title,
+                    'datum'       => $datum_raw,
+                    'hodiny'      => ($hodiny_os_raw !== '' && $hodiny_os_raw !== null) ? intval($hodiny_os_raw) : null,
+                    'hodiny_osob' => (is_array($hodiny_osob_arr) && !empty($hodiny_osob_arr)) ? $hodiny_osob_arr : null,
+                    'pocet_osob'  => $n_osob_abs,
+                    'celkem_h'    => $celkem_hodin_brigady,
                 ];
             }
         } else {
@@ -2230,15 +2232,22 @@ function sb_moje_brigady_shortcode() {
     if ($zaznamy_absolvovane) {
         usort($zaznamy_absolvovane, fn($a, $b) => strcmp($b['datum'], $a['datum']));
         echo "<table class='sbf-table'>";
-        echo "<tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hod./os.</th><th>Celkem</th></tr>";
+        echo "<tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hodiny</th><th>Celkem</th></tr>";
         foreach ($zaznamy_absolvovane as $z) {
             $d_obj = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
             $d_fmt = $d_obj ? $d_obj->format('d. m. Y') : esc_html($z['datum']);
+            if ($z['hodiny_osob'] !== null) {
+                $hodiny_cell = implode(', ', array_map(fn($h) => $h . ' h', $z['hodiny_osob']));
+            } elseif ($z['hodiny'] !== null) {
+                $hodiny_cell = $z['hodiny'] . ' h/os.';
+            } else {
+                $hodiny_cell = '<span style="color:#999;">–</span>';
+            }
             echo "<tr>";
             echo "<td>" . esc_html($z['nazev']) . "</td>";
             echo "<td class='c'>" . $d_fmt . "</td>";
             echo "<td class='c'>" . intval($z['pocet_osob']) . "</td>";
-            echo "<td class='c'>" . ($z['hodiny'] !== null ? intval($z['hodiny']) . ' h/os.' : '<span style="color:#999;">–</span>') . "</td>";
+            echo "<td class='c'>" . $hodiny_cell . "</td>";
             echo "<td class='c'><strong>" . intval($z['celkem_h']) . " h</strong></td>";
             echo "</tr>";
         }
