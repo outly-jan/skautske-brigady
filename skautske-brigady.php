@@ -213,6 +213,10 @@ if (array_intersect($roles, $allowed_limited)) {
         if (isset($_POST['upravit_pozadavky_dle_roku']) || isset($_POST['ulozit_pozadavky'])) {
             $aktivni_sekce = 'upravit_pozadavky';
         }
+        // Rodiny dle brigád
+        if (isset($_POST['zobraz_rodinu_admin'])) {
+            $aktivni_sekce = 'rodiny_dle_brigad';
+        }
         // Roční výpis
         if (isset($_POST['zobraz_rocni_vypis'])) {
             $aktivni_sekce = 'rocni_vypis';
@@ -383,9 +387,11 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('upravit_brigady')">🛠️ Vytvoření a správa brigád</button>
             <button onclick="sbShowSection('upravit_ucastniky')">🧮 Správa účastníků</button>
             <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
+            <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
             <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
+    <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
     <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
 <?php endif; ?>
     </div>
@@ -481,9 +487,11 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-upravit_brigady" class="<?php echo ($aktivni_sekce === 'upravit_brigady') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_brigad(); ?></div>
             <div id="sb-upravit_ucastniky" class="<?php echo ($aktivni_sekce === 'upravit_ucastniky') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_ucastniku(); ?></div>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
+            <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
+            <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
         <?php endif; ?>
     </div>
@@ -2335,6 +2343,219 @@ function sb_moje_brigady_shortcode() {
 }
 
 add_shortcode('moje_brigady', 'sb_moje_brigady_shortcode');
+
+// =====================================================================
+// ADMIN TAB: Rodiny dle brigád – read-only přehled vybrané rodiny
+// =====================================================================
+function sb_rodiny_dle_brigad_tab() {
+    $rodiny = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+    $vybrana_rodina_id = isset($_POST['vybrana_rodina_admin']) ? intval($_POST['vybrana_rodina_admin']) : 0;
+
+    ob_start();
+    echo "<h3 class='sb-section-title'>👪 Rodiny dle brigád</h3>";
+
+    echo "<div class='sb-card'>";
+    echo "<form method='post' class='sb-form-row'>";
+    echo "<div class='sb-form-group sb-fg-inline'><label>Vyber rodinu:</label><select name='vybrana_rodina_admin'>";
+    foreach ($rodiny as $r) {
+        $sel = ($vybrana_rodina_id === $r->ID) ? 'selected' : '';
+        echo "<option value='" . intval($r->ID) . "' $sel>" . esc_html($r->post_title) . "</option>";
+    }
+    echo "</select></div>";
+    echo "<input type='submit' name='zobraz_rodinu_admin' value='Zobrazit' class='sb-btn sb-btn-primary'>";
+    echo "</form>";
+    echo "</div>";
+
+    if (!$vybrana_rodina_id && !empty($rodiny)) {
+        return ob_get_clean();
+    }
+
+    if (!$vybrana_rodina_id) $vybrana_rodina_id = $rodiny[0]->ID;
+
+    // --- Data rodiny ---
+    $nazev_rodiny = get_the_title($vybrana_rodina_id);
+    $deti         = get_post_meta($vybrana_rodina_id, 'deti_rodiny', true);
+    $pocet_deti   = is_array($deti) ? count($deti) : 0;
+
+    $tz       = wp_timezone();
+    $dnes     = new DateTime('today', $tz);
+    $mesic    = intval($dnes->format('m'));
+    $rok_nyni = intval($dnes->format('Y'));
+
+    if ($mesic === 12) {
+        $rok_aktivni = $rok_nyni; $rok_druhy = $rok_nyni + 1;
+    } elseif ($mesic <= 2) {
+        $rok_aktivni = $rok_nyni; $rok_druhy = $rok_nyni - 1;
+    } else {
+        $rok_aktivni = $rok_nyni; $rok_druhy = null;
+    }
+
+    $pozadavky_vse = get_option('pozadavky_dle_roku', []);
+    $pozadavky_rok = isset($pozadavky_vse[$rok_aktivni]) ? $pozadavky_vse[$rok_aktivni] : null;
+    $pozadavek = $sazba = 0;
+    if ($pozadavky_rok) {
+        $pozadavek = intval($pozadavky_rok[min($pocet_deti, 3)] ?? 0);
+        $sazba     = floatval($pozadavky_rok['sazba'] ?? 0);
+    }
+
+    $brigady             = get_posts(['post_type' => 'brigada', 'numberposts' => -1]);
+    $odpracovano_aktivni = 0;
+    $odpracovano_druhy   = 0;
+    $absolvovane         = [];
+    $nadchazejici        = [];
+    $neprihlasene        = [];
+
+    foreach ($brigady as $b) {
+        $datum_raw  = get_post_meta($b->ID, 'datum_brigady', true);
+        $datum_obj  = DateTime::createFromFormat('Y-m-d', $datum_raw, $tz);
+        $prihlaseno = get_post_meta($b->ID, 'ucastnici_' . $vybrana_rodina_id, true);
+        $celkem_h   = sb_celkem_hodin($b->ID, $vybrana_rodina_id);
+
+        if ($celkem_h !== null) {
+            $rok_b = $datum_obj ? intval($datum_obj->format('Y')) : null;
+            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $celkem_h;
+            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $celkem_h;
+        }
+
+        if ($datum_obj && $datum_obj < $dnes) {
+            if ($celkem_h !== null) {
+                $h_os = get_post_meta($b->ID, 'odpracovano_' . $vybrana_rodina_id, true);
+                $absolvovane[] = [
+                    'nazev'    => $b->post_title,
+                    'datum'    => $datum_raw,
+                    'hodiny'   => ($h_os !== '' && $h_os !== null) ? intval($h_os) : null,
+                    'pocet'    => max(1, intval($prihlaseno)),
+                    'celkem_h' => $celkem_h,
+                ];
+            }
+        } else {
+            $meta_b = get_post_meta($b->ID);
+            $celkem_prihlasen = 0;
+            foreach ($meta_b as $mk => $mv) {
+                if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') $celkem_prihlasen += intval($mv[0]);
+            }
+            $potrebujeme = intval(get_post_meta($b->ID, 'pozadovany_pocet', true));
+            if ($prihlaseno) {
+                $nadchazejici[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'pocet' => intval($prihlaseno), 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme];
+            } else {
+                $je_plno = ($potrebujeme > 0 && $celkem_prihlasen >= $potrebujeme);
+                $neprihlasene[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme, 'je_plno' => $je_plno];
+            }
+        }
+    }
+
+    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni);
+    $poplatek = $zbyva * $sazba;
+
+    $pozadavky_druhy = ($rok_druhy && isset($pozadavky_vse[$rok_druhy])) ? $pozadavky_vse[$rok_druhy] : null;
+    $pozadavek_druhy = $sazba_druhy = $zbyva_druhy = $poplatek_druhy = 0;
+    if ($rok_druhy && $pozadavky_druhy) {
+        $pozadavek_druhy = intval($pozadavky_druhy[min($pocet_deti, 3)] ?? 0);
+        $sazba_druhy     = floatval($pozadavky_druhy['sazba'] ?? 0);
+        $zbyva_druhy     = max(0, $pozadavek_druhy - $odpracovano_druhy);
+        $poplatek_druhy  = $zbyva_druhy * $sazba_druhy;
+    }
+
+    // --- Výpis ---
+    echo "<div style='font-size:13px; margin:8px 0 12px;'>Rodina: <strong>" . esc_html($nazev_rodiny) . "</strong> &nbsp;·&nbsp; Děti: <strong>$pocet_deti</strong>";
+    if (is_array($deti) && !empty($deti)) {
+        echo " — " . implode(', ', array_map(fn($d) => esc_html($d['jmeno']) . ' (' . esc_html($d['oddil']) . ')', $deti));
+    }
+    echo "</div>";
+
+    // Finanční přehled
+    echo "<h5 class='sbf-col-title' style='margin-bottom:10px;'>📘 Přehled brigádnických požadavků</h5>";
+    echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;'>";
+
+    $barva_z = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
+    echo "<div style='border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
+    echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div><table class='sbf-req-table'>";
+    echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_z) . ";'>$zbyva h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
+    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong></td></tr>";
+    echo "</table></div>";
+
+    if ($rok_druhy && $pozadavky_druhy) {
+        $barva_zd = ($zbyva_druhy === 0) ? '#2e7d32' : '#c0392b';
+        echo "<div style='border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
+        echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_druhy</div><table class='sbf-req-table'>";
+        echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zd) . ";'>$zbyva_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
+        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong></td></tr>";
+        echo "</table></div>";
+    }
+    echo "</div>";
+
+    // Tři sloupce
+    echo "<div class='sbf-cols'>";
+
+    // Absolvované
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>✅ Absolvované brigády</h5>";
+    if ($absolvovane) {
+        usort($absolvovane, fn($a, $b) => strcmp($b['datum'], $a['datum']));
+        echo "<table class='sbf-table'><tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hod./os.</th><th>Celkem</th></tr>";
+        foreach ($absolvovane as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            echo "<tr><td>" . esc_html($z['nazev']) . "</td><td class='c'>" . ($d ? $d->format('d. m. Y') : esc_html($z['datum'])) . "</td>";
+            echo "<td class='c'>" . $z['pocet'] . "</td>";
+            echo "<td class='c'>" . ($z['hodiny'] !== null ? $z['hodiny'] . ' h/os.' : '<span style="color:#999;">–</span>') . "</td>";
+            echo "<td class='c'><strong>" . $z['celkem_h'] . " h</strong></td></tr>";
+        }
+        echo "</table>";
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Zatím žádné záznamy.</p>";
+    }
+    echo "</div>";
+
+    // Přihlášené nadcházející
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>📅 Přihlášené brigády</h5>";
+    if ($nadchazejici) {
+        usort($nadchazejici, fn($a, $b) => strcmp($a['datum'], $b['datum']));
+        foreach ($nadchazejici as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            $d_fmt = $d ? $d->format('d. m. Y') : esc_html($z['datum']);
+            echo "<div class='sbf-card'>";
+            echo "<div class='sbf-name'>" . esc_html($z['nazev']) . "</div>";
+            echo "<div class='sbf-meta'>📅 $d_fmt &nbsp;·&nbsp; 👥 Přihlášeno: <strong>" . $z['pocet'] . " os.</strong>";
+            if ($z['potrebujeme'] > 0) echo " <span style='color:#888;'>(" . $z['celkem'] . " / " . $z['potrebujeme'] . ")</span>";
+            echo "</div></div>";
+        }
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Rodina není přihlášena na žádnou nadcházející brigádu.</p>";
+    }
+    echo "</div>";
+
+    // Nepřihlášené
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>📌 Brigády bez přihlášení</h5>";
+    if ($neprihlasene) {
+        usort($neprihlasene, fn($a, $b) => strcmp($a['datum'], $b['datum']));
+        foreach ($neprihlasene as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            $d_fmt = $d ? $d->format('d. m. Y') : esc_html($z['datum']);
+            $style = $z['je_plno'] ? "border-color:#e57373; background:#fff5f5;" : "";
+            echo "<div class='sbf-card-gray' style='$style'>";
+            echo "<div class='sbf-name'>" . esc_html($z['nazev']) . "</div>";
+            echo "<div class='sbf-meta'>📅 $d_fmt";
+            if ($z['potrebujeme'] > 0) echo " &nbsp;·&nbsp; Obsazenost: " . $z['celkem'] . " / " . $z['potrebujeme'];
+            if ($z['je_plno']) echo " <span style='color:#c62828; font-weight:600;'>– plno</span>";
+            echo "</div></div>";
+        }
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Rodina je přihlášena na všechny nadcházející brigády.</p>";
+    }
+    echo "</div>";
+
+    echo "</div>"; // sbf-cols
+
+    return ob_get_clean();
+}
 
 // Frontend: přehled nadcházejících brigád + přihlašování rodin
 function sb_prehled_brigad_frontend() {
