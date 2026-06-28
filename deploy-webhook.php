@@ -17,6 +17,7 @@ if (!$content || strlen($content) < 10000) {
 }
 
 file_put_contents(__DIR__ . '/skautske-brigady.php', $content);
+file_put_contents(__DIR__ . '/.sb_deploy_flag', time());
 if (function_exists('opcache_invalidate')) {
     opcache_invalidate(__DIR__ . '/skautske-brigady.php', true);
 }

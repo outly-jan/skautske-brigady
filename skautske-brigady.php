@@ -8,6 +8,16 @@ Author: Honza & Copilot
 
 if (!defined('ABSPATH')) exit;
 
+// Po deployi: každý PHP-FPM proces invaliduje svůj OPcache záznam
+$_sb_flag = __DIR__ . '/.sb_deploy_flag';
+if (file_exists($_sb_flag)) {
+    @unlink($_sb_flag);
+    if (function_exists('opcache_invalidate')) {
+        opcache_invalidate(__FILE__, true);
+    }
+}
+unset($_sb_flag);
+
 // CSV Export: roční výpis
 function sb_export_rocni_vypis_csv() {
     if (!isset($_GET['sb_export']) || $_GET['sb_export'] !== 'rocni_vypis') return;
