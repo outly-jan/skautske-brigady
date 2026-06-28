@@ -2097,6 +2097,27 @@ function sb_moje_brigady_shortcode() {
                     'pocet_osob'  => $n_osob_abs,
                     'celkem_h'    => $celkem_hodin_brigady,
                 ];
+            } else {
+                $walkins_b = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                if (is_array($walkins_b)) {
+                    foreach ($walkins_b as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $rodina->post_title) {
+                            $walkin_h    = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_brigady = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_brigady === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_brigady === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $zaznamy_absolvovane[] = [
+                                'nazev'       => $b->post_title,
+                                'datum'       => $datum_raw,
+                                'hodiny'      => intval($w['hodiny']),
+                                'hodiny_osob' => null,
+                                'pocet_osob'  => intval($w['pocet']),
+                                'celkem_h'    => $walkin_h,
+                            ];
+                            break;
+                        }
+                    }
+                }
             }
         } else {
             // Celkový počet přihlášených přes všechny rodiny
@@ -2446,6 +2467,26 @@ function sb_rodiny_dle_brigad_tab() {
                     'pocet'    => max(1, intval($prihlaseno)),
                     'celkem_h' => $celkem_h,
                 ];
+            } else {
+                $walkins_b = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                if (is_array($walkins_b)) {
+                    foreach ($walkins_b as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $nazev_rodiny) {
+                            $walkin_h = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_b    = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $absolvovane[] = [
+                                'nazev'    => $b->post_title,
+                                'datum'    => $datum_raw,
+                                'hodiny'   => intval($w['hodiny']),
+                                'pocet'    => intval($w['pocet']),
+                                'celkem_h' => $walkin_h,
+                            ];
+                            break;
+                        }
+                    }
+                }
             }
         } else {
             $meta_b = get_post_meta($b->ID);
