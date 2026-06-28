@@ -2142,14 +2142,38 @@ function sb_moje_brigady_shortcode() {
                     'je_plno'             => $je_plno,
                 ];
             } else {
-                $zaznamy_neprihlasene[] = [
-                    'id'                  => $b->ID,
-                    'nazev'               => $b->post_title,
-                    'datum'               => $datum_raw,
-                    'celkem_prihlasenych' => $celkem_prihlasenych,
-                    'potrebujeme'         => $potrebujeme_b,
-                    'je_plno'             => $je_plno,
-                ];
+                $walkins_dnes = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                $walkin_found = false;
+                if (is_array($walkins_dnes)) {
+                    foreach ($walkins_dnes as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $rodina->post_title) {
+                            $walkin_h    = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_brigady = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_brigady === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_brigady === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $zaznamy_absolvovane[] = [
+                                'nazev'       => $b->post_title,
+                                'datum'       => $datum_raw,
+                                'hodiny'      => intval($w['hodiny']),
+                                'hodiny_osob' => null,
+                                'pocet_osob'  => intval($w['pocet']),
+                                'celkem_h'    => $walkin_h,
+                            ];
+                            $walkin_found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!$walkin_found) {
+                    $zaznamy_neprihlasene[] = [
+                        'id'                  => $b->ID,
+                        'nazev'               => $b->post_title,
+                        'datum'               => $datum_raw,
+                        'celkem_prihlasenych' => $celkem_prihlasenych,
+                        'potrebujeme'         => $potrebujeme_b,
+                        'je_plno'             => $je_plno,
+                    ];
+                }
             }
         }
     }
@@ -2498,8 +2522,31 @@ function sb_rodiny_dle_brigad_tab() {
             if ($prihlaseno) {
                 $nadchazejici[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'pocet' => intval($prihlaseno), 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme];
             } else {
-                $je_plno = ($potrebujeme > 0 && $celkem_prihlasen >= $potrebujeme);
-                $neprihlasene[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme, 'je_plno' => $je_plno];
+                $walkins_dnes = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                $walkin_found = false;
+                if (is_array($walkins_dnes)) {
+                    foreach ($walkins_dnes as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $nazev_rodiny) {
+                            $walkin_h = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_b    = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $absolvovane[] = [
+                                'nazev'    => $b->post_title,
+                                'datum'    => $datum_raw,
+                                'hodiny'   => intval($w['hodiny']),
+                                'pocet'    => intval($w['pocet']),
+                                'celkem_h' => $walkin_h,
+                            ];
+                            $walkin_found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!$walkin_found) {
+                    $je_plno = ($potrebujeme > 0 && $celkem_prihlasen >= $potrebujeme);
+                    $neprihlasene[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme, 'je_plno' => $je_plno];
+                }
             }
         }
     }
