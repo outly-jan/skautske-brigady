@@ -2273,6 +2273,7 @@ function sb_moje_brigady_shortcode() {
             echo "<input type='hidden' name='brigada_id' value='" . intval($z['id']) . "'>";
             echo "<label>Počet:</label>";
             echo "<input type='number' name='pocet_osob' min='1' value='" . intval($z['pocet_osob']) . "' required class='sbf-num'>";
+            echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
             echo "<input type='submit' name='upravit_brigadu' value='💾 Uložit' class='sbf-btn sbf-btn-blue'>";
             echo "<input type='submit' name='odhlasit_brigadu' value='✕ Odhlásit' class='sbf-btn sbf-btn-red' onclick='return confirm(\"Opravdu se chcete odhlásit?\");'>";
             echo "</form>";
@@ -2317,6 +2318,7 @@ function sb_moje_brigady_shortcode() {
                 echo "<input type='hidden' name='brigada_id' value='" . intval($z['id']) . "'>";
                 echo "<label>Počet osob:</label>";
                 echo "<input type='number' name='pocet_osob' min='1' value='1' required class='sbf-num'>";
+                echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
                 echo "<input type='submit' name='prihlasit_brigadu' value='✓ Přihlásit se' class='sbf-btn sbf-btn-green'>";
                 echo "</form>";
             }
@@ -2522,6 +2524,7 @@ if ($datum_valid < $dnes) {
 
                 echo "<label style='margin-right:6px;'>Upravit počet:</label>";
                 echo "<input type='number' name='pocet_osob' min='0' value='" . esc_attr($prihlaseno) . "' required style='width:60px; text-align:center;'>";
+                echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
 
                 echo "<input type='submit' name='upravit_ucast' value='💾 Uložit změnu' style='background:#0073aa; color:white; padding:5px 10px;'>";
                 echo "<input type='submit' name='odhlasit_ucast' value='❌ Nepřijdeme – odhlásit se' style='background:#d32f2f; color:white; padding:5px 10px;'>";
@@ -2631,6 +2634,7 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
         echo "<input type='hidden' name='brigada_id' value='" . esc_attr($brigada_id) . "'>";
         echo "<label>Upravit počet:</label> ";
         echo "<input type='number' name='pocet_osob' min='1' value='" . esc_attr($uz_prihlaseno) . "' required>";
+        echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
         echo "<input type='submit' name='prihlasit_na_brigadu' value='💾 Uložit' style='background:#0073aa; color:white; padding:5px 10px;'>";
         echo "</form>";
 
@@ -2648,7 +2652,8 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
         wp_nonce_field('sb_prihlaseni_na_brigadu', '_wpnonce_sb_prihlaseni');
         echo "<input type='hidden' name='brigada_id' value='" . esc_attr($brigada_id) . "'>";
         echo "<label>Kolik vás za vaši rodinu přijde?</label><br>";
-        echo "<input type='number' name='pocet_osob' min='1' required><br><br>";
+        echo "<input type='number' name='pocet_osob' min='1' required>";
+        echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small><br>";
         echo "<input type='submit' name='prihlasit_na_brigadu' value='💾 Zapsat se' style='background:#0073aa; color:white; padding:5px 10px;'>";
         echo "</form>";
     }
