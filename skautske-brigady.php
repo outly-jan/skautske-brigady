@@ -1699,9 +1699,13 @@ function sb_rocni_vypis() {
         $stat_style = "flex:1; min-width:200px; padding:12px 16px; border-radius:4px; font-size:13px; line-height:1.7;";
         echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:20px;'>";
 
+        $zbývá_hodin_ted  = ($sazba > 0) ? (int) round($celkem_poplatek / $sazba) : 0;
+        $zbývá_hodin_proj = ($sazba > 0) ? (int) round($predpokladane_inkaso / $sazba) : 0;
+
         echo "<div style='$stat_style background:#fff3cd; border:1px solid #f0c040;'>"
             . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>💰 Aktuální inkaso</div>"
             . "<div>Celkem k inkasu: <strong>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong></div>"
+            . "<div>Zbývá odpracovat: <strong>$zbývá_hodin_ted h</strong></div>"
             . "</div>";
 
         echo "<div style='$stat_style background:#e8f5e9; border:1px solid #a5d6a7;'>"
@@ -1713,7 +1717,8 @@ function sb_rocni_vypis() {
         echo "<div style='$stat_style background:#e3f2fd; border:1px solid #90caf9;'>"
             . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>📅 Plánované brigády</div>"
             . "<div>Hodin brigád: <strong>$budouci_brigady_h h</strong></div>"
-            . "<div>Předp. člověkohodiny: <strong>$budouci_clovekoh h</strong></div>"
+            . "<div>Předp. člověkohodiny (přihlášení): <strong>$budouci_clovekoh h</strong></div>"
+            . "<div>Předp. zbývající hodiny: <strong>$zbývá_hodin_proj h</strong></div>"
             . "<div>Předp. inkaso na konci roku: <strong>" . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>"
             . "</div>";
 
