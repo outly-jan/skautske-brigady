@@ -1579,24 +1579,9 @@ function sb_rocni_vypis() {
         $pozadavky_rok = $pozadavky[$vybrany_rok] ?? null;
         $sazba = isset($pozadavky_rok['sazba']) ? floatval($pozadavky_rok['sazba']) : 0;
 
+        // --- Nejprve projdeme všechny rodiny a sestavíme data i celkový součet ---
         $celkem_poplatek = 0;
-
-        echo "<div class='sb-card'>";
-        echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
-
-        echo "<table class='sb-table'>";
-        echo "<tr>
-            <th>Rodina</th>
-            <th>Děti</th>
-            <th>Rodiče</th>
-            <th class='center'>Počet dětí</th>
-            <th class='center'>Odpracováno (h)</th>
-            <th class='center'>Požadavek (h)</th>
-            <th class='center'>Rozdíl (h)</th>
-            <th class='center'>Poplatek (Kč)</th>
-            <th>Brigády</th>
-        </tr>";
-
+        $radky = [];
         foreach ($rodiny as $r) {
             $rodina_id = $r->ID;
             $nazev = esc_html($r->post_title);
@@ -1607,9 +1592,7 @@ function sb_rocni_vypis() {
             $jmena_deti = '';
             if (is_array($deti)) {
                 foreach ($deti as $dite) {
-                    $jmeno = esc_html($dite['jmeno']);
-                    $oddil = esc_html($dite['oddil']);
-                    $jmena_deti .= "$jmeno – $oddil<br>";
+                    $jmena_deti .= esc_html($dite['jmeno']) . " – " . esc_html($dite['oddil']) . "<br>";
                 }
             }
 
@@ -1617,24 +1600,17 @@ function sb_rocni_vypis() {
             if (is_array($rodice)) {
                 foreach ($rodice as $rid) {
                     $u = get_user_by('id', $rid);
-                    if ($u) {
-                        $jmena_rodicu .= sb_format_rodic_jmeno($u) . "<br>";
-                    }
+                    if ($u) $jmena_rodicu .= sb_format_rodic_jmeno($u) . "<br>";
                 }
             }
 
             $pozadavek = 0;
             if ($pozadavky_rok) {
-                if ($pocet_deti == 1) {
-                    $pozadavek = intval($pozadavky_rok['1']);
-                } elseif ($pocet_deti == 2) {
-                    $pozadavek = intval($pozadavky_rok['2']);
-                } elseif ($pocet_deti >= 3) {
-                    $pozadavek = intval($pozadavky_rok['3']);
-                }
+                if ($pocet_deti == 1) $pozadavek = intval($pozadavky_rok['1']);
+                elseif ($pocet_deti == 2) $pozadavek = intval($pozadavky_rok['2']);
+                elseif ($pocet_deti >= 3) $pozadavek = intval($pozadavky_rok['3']);
             }
 
-            // Odpracované hodiny — přihlášení i walk-in
             $odpracovano = 0;
             $brigady_seznam = [];
             foreach ($brigady as $b) {
@@ -1655,12 +1631,10 @@ function sb_rocni_vypis() {
                     if (is_array($walkins)) {
                         foreach ($walkins as $w) {
                             if (($w['jmeno'] ?? '') === $r->post_title) {
-                                $pocet_w = max(1, intval($w['pocet'] ?? 1));
-                                $hodiny_w = intval($w['hodiny'] ?? 0);
-                                $celkem = $pocet_w * $hodiny_w;
-                                $odpracovano += $celkem;
+                                $c = max(1, intval($w['pocet'] ?? 1)) * intval($w['hodiny'] ?? 0);
+                                $odpracovano += $c;
                                 $d = $datum_raw ? date('j. n.', strtotime($datum_raw)) : '';
-                                $brigady_seznam[] = esc_html($b->post_title) . ($d ? ' ' . $d : '') . ' (' . $celkem . ' h)';
+                                $brigady_seznam[] = esc_html($b->post_title) . ($d ? ' ' . $d : '') . ' (' . $c . ' h)';
                                 break;
                             }
                         }
@@ -1668,28 +1642,48 @@ function sb_rocni_vypis() {
                 }
             }
 
-            $rozdil = $odpracovano - $pozadavek;
+            $rozdil  = $odpracovano - $pozadavek;
             $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
             $celkem_poplatek += $poplatek;
-            $trida_rozdil = $rozdil >= 0 ? 'green' : 'red';
-            $brigady_str = implode('<br>', $brigady_seznam);
+            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam');
+        }
+
+        // --- Výpis ---
+        echo "<div class='sb-card'>";
+        echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
+
+        echo "<div style='display:inline-block; margin-bottom:16px; padding:10px 20px; background:#fff3cd; border:1px solid #f0c040; border-radius:4px; font-size:14px;'>"
+            . "💰 Celkem k inkasu: <strong style='font-size:16px;'>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong>"
+            . "</div>";
+
+        echo "<table class='sb-table'>";
+        echo "<tr>
+            <th>Rodina</th>
+            <th>Děti</th>
+            <th>Rodiče</th>
+            <th class='center'>Počet dětí</th>
+            <th class='center'>Odpracováno (h)</th>
+            <th class='center'>Požadavek (h)</th>
+            <th class='center'>Rozdíl (h)</th>
+            <th class='center'>Poplatek (Kč)</th>
+            <th>Brigády</th>
+        </tr>";
+
+        foreach ($radky as $z) {
+            $trida_rozdil = $z['rozdil'] >= 0 ? 'green' : 'red';
+            $brigady_str  = implode('<br>', $z['brigady_seznam']);
             echo "<tr>
-                <td>$nazev</td>
-                <td class='sb-small'>$jmena_deti</td>
-                <td class='sb-small'>$jmena_rodicu</td>
-                <td class='center'>$pocet_deti</td>
-                <td class='center'>$odpracovano</td>
-                <td class='center'>$pozadavek</td>
-                <td class='center $trida_rozdil'>" . intval($rozdil) . "</td>
-                <td class='center'>" . number_format($poplatek, 2, ',', ' ') . "</td>
+                <td>" . $z['nazev'] . "</td>
+                <td class='sb-small'>" . $z['jmena_deti'] . "</td>
+                <td class='sb-small'>" . $z['jmena_rodicu'] . "</td>
+                <td class='center'>" . $z['pocet_deti'] . "</td>
+                <td class='center'>" . $z['odpracovano'] . "</td>
+                <td class='center'>" . $z['pozadavek'] . "</td>
+                <td class='center $trida_rozdil'>" . intval($z['rozdil']) . "</td>
+                <td class='center'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
                 <td class='sb-small'>$brigady_str</td>
             </tr>";
         }
-        echo "<tr style='border-top:2px solid #333; font-weight:600; background:#f5f5f5;'>
-            <td colspan='7' style='text-align:right; padding-right:12px;'>Celkem k inkasu:</td>
-            <td class='center'>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</td>
-            <td></td>
-        </tr>";
         echo "</table>";
 
         $export_url = add_query_arg([
