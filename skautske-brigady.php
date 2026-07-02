@@ -1645,16 +1645,79 @@ function sb_rocni_vypis() {
             $rozdil  = $odpracovano - $pozadavek;
             $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
             $celkem_poplatek += $poplatek;
-            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam');
+            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id');
+        }
+
+        // --- Agregované statistiky brigád ---
+        $minule_clovekoh   = 0;
+        foreach ($radky as $z) $minule_clovekoh += $z['odpracovano'];
+
+        $dnes_stat         = new DateTime('today', wp_timezone());
+        $minule_brigady_h  = 0;
+        $budouci_brigady_h = 0;
+        $budouci_clovekoh  = 0;
+        $rodina_budouci_h  = [];
+
+        foreach ($brigady as $b) {
+            $datum_raw = get_post_meta($b->ID, 'datum_brigady', true);
+            $rok_v_datu = null;
+            if ($datum_raw && preg_match('/\b(19|20)\d{2}\b/', $datum_raw, $m2)) {
+                $rok_v_datu = intval($m2[0]);
+            }
+            if ($rok_v_datu !== $vybrany_rok) continue;
+
+            $datum_obj_stat = DateTime::createFromFormat('Y-m-d', $datum_raw, wp_timezone());
+            preg_match('/\d+/', (string) get_post_meta($b->ID, 'delka_brigady', true), $dm);
+            $delka_h = isset($dm[0]) ? intval($dm[0]) : 0;
+
+            if ($datum_obj_stat && $datum_obj_stat < $dnes_stat) {
+                $minule_brigady_h += $delka_h;
+            } else {
+                $budouci_brigady_h += $delka_h;
+                $meta_b = get_post_meta($b->ID);
+                foreach ($meta_b as $mk => $mv) {
+                    if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                        $pocet_r = intval($mv[0]);
+                        $budouci_clovekoh += $pocet_r * $delka_h;
+                        $rid = intval(substr($mk, strlen('ucastnici_')));
+                        $rodina_budouci_h[$rid] = ($rodina_budouci_h[$rid] ?? 0) + $pocet_r * $delka_h;
+                    }
+                }
+            }
+        }
+
+        $predpokladane_inkaso = 0;
+        foreach ($radky as $z) {
+            $proj = $z['odpracovano'] + ($rodina_budouci_h[$z['rodina_id']] ?? 0);
+            $predpokladane_inkaso += max(0, $z['pozadavek'] - $proj) * $sazba;
         }
 
         // --- Výpis ---
         echo "<div class='sb-card'>";
         echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
 
-        echo "<div style='display:inline-block; margin-bottom:16px; padding:10px 20px; background:#fff3cd; border:1px solid #f0c040; border-radius:4px; font-size:14px;'>"
-            . "💰 Celkem k inkasu: <strong style='font-size:16px;'>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong>"
+        $stat_style = "flex:1; min-width:200px; padding:12px 16px; border-radius:4px; font-size:13px; line-height:1.7;";
+        echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:20px;'>";
+
+        echo "<div style='$stat_style background:#fff3cd; border:1px solid #f0c040;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>💰 Aktuální inkaso</div>"
+            . "<div>Celkem k inkasu: <strong>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong></div>"
             . "</div>";
+
+        echo "<div style='$stat_style background:#e8f5e9; border:1px solid #a5d6a7;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>✅ Uskutečněné brigády</div>"
+            . "<div>Hodin brigád: <strong>$minule_brigady_h h</strong></div>"
+            . "<div>Odpracováno: <strong>$minule_clovekoh člověkohodin</strong></div>"
+            . "</div>";
+
+        echo "<div style='$stat_style background:#e3f2fd; border:1px solid #90caf9;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>📅 Plánované brigády</div>"
+            . "<div>Hodin brigád: <strong>$budouci_brigady_h h</strong></div>"
+            . "<div>Předp. člověkohodiny: <strong>$budouci_clovekoh h</strong></div>"
+            . "<div>Předp. inkaso na konci roku: <strong>" . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>"
+            . "</div>";
+
+        echo "</div>";
 
         echo "<table class='sb-table'>";
         echo "<tr>
