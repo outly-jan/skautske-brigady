@@ -1579,6 +1579,8 @@ function sb_rocni_vypis() {
         $pozadavky_rok = $pozadavky[$vybrany_rok] ?? null;
         $sazba = isset($pozadavky_rok['sazba']) ? floatval($pozadavky_rok['sazba']) : 0;
 
+        $celkem_poplatek = 0;
+
         echo "<div class='sb-card'>";
         echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
 
@@ -1668,6 +1670,7 @@ function sb_rocni_vypis() {
 
             $rozdil = $odpracovano - $pozadavek;
             $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
+            $celkem_poplatek += $poplatek;
             $trida_rozdil = $rozdil >= 0 ? 'green' : 'red';
             $brigady_str = implode('<br>', $brigady_seznam);
             echo "<tr>
@@ -1682,6 +1685,11 @@ function sb_rocni_vypis() {
                 <td class='sb-small'>$brigady_str</td>
             </tr>";
         }
+        echo "<tr style='border-top:2px solid #333; font-weight:600; background:#f5f5f5;'>
+            <td colspan='7' style='text-align:right; padding-right:12px;'>Celkem k inkasu:</td>
+            <td class='center'>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</td>
+            <td></td>
+        </tr>";
         echo "</table>";
 
         $export_url = add_query_arg([
