@@ -239,6 +239,7 @@ td.podpis { width: 200px; }
     <?php if ($cas): ?>⏰ <?php echo esc_html($cas); ?><?php endif; ?>
 </div>
 <table>
+    <thead>
     <tr>
         <th style="width:200px; text-align:left;">Rodina</th>
         <th style="width:70px;">Účastník</th>
@@ -246,6 +247,8 @@ td.podpis { width: 200px; }
         <th style="width:120px;">Čas odchodu</th>
         <th style="width:200px;">Podpis</th>
     </tr>
+    </thead>
+    <tbody>
     <?php foreach ($radky as $rl): ?>
         <?php for ($i = 1; $i <= $rl['osob']; $i++): ?>
         <tr>
@@ -261,6 +264,16 @@ td.podpis { width: 200px; }
         </tr>
         <?php endfor; ?>
     <?php endforeach; ?>
+    <?php for ($w = 0; $w < 10; $w++): ?>
+    <tr>
+        <td class="cas"></td>
+        <td class="ucastnik" style="color:#bbb;">walk-in</td>
+        <td class="cas"></td>
+        <td class="cas"></td>
+        <td class="podpis"></td>
+    </tr>
+    <?php endfor; ?>
+    </tbody>
 </table>
 </body>
 </html>
