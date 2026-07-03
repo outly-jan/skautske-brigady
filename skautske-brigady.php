@@ -1696,8 +1696,9 @@ function sb_rocni_vypis() {
         echo "<div class='sb-card'>";
         echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
 
-        $stat_style   = "flex:1; min-width:200px; padding:12px 16px; border-radius:4px; font-size:13px; line-height:1.7;";
-        $hodnota_brigad = $budouci_clovekoh * $sazba;
+        $stat_style      = "flex:1; min-width:200px; padding:12px 16px; border-radius:4px; font-size:13px; line-height:1.7;";
+        $hodnota_brigad  = $budouci_clovekoh * $sazba;
+        $realne_snizeni  = $celkem_poplatek - $predpokladane_inkaso;
 
         echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px;'>";
 
@@ -1717,12 +1718,14 @@ function sb_rocni_vypis() {
             . "<div>Hodin brigád: <strong>$budouci_brigady_h h</strong></div>"
             . "<div>Předp. člověkohodiny: <strong>$budouci_clovekoh h</strong></div>"
             . "<div>Hodnota brigád: <strong>" . number_format($hodnota_brigad, 2, ',', ' ') . " Kč</strong></div>"
+            . "<div>Reálné snížení inkasa: <strong>" . number_format($realne_snizeni, 2, ',', ' ') . " Kč</strong></div>"
             . "</div>";
 
         echo "</div>";
 
-        echo "<div style='margin-bottom:20px; font-size:13px;'>Předpokládané inkaso na konci roku: <strong style='font-size:15px;'>"
+        echo "<div style='margin-bottom:6px; font-size:13px;'>Předpokládané inkaso na konci roku: <strong style='font-size:15px;'>"
             . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>";
+        echo "<div style='margin-bottom:20px; font-size:12px; color:#666; font-style:italic;'>Část rodin je na brigády přihlášena, přestože svůj požadavek hodin již splnily — jejich hodiny inkaso dále nesnižují.</div>";
 
         echo "<table class='sb-table'>";
         echo "<tr>
