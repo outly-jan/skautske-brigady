@@ -1725,7 +1725,7 @@ function sb_rocni_vypis() {
 
         echo "<div style='margin-bottom:6px; font-size:13px;'>Předpokládané inkaso na konci roku: <strong style='font-size:15px;'>"
             . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>";
-        echo "<div style='margin-bottom:20px; font-size:12px; color:#666; font-style:italic;'>Část rodin je na brigády přihlášena, přestože svůj požadavek hodin již splnily — jejich hodiny inkaso dále nesnižují.</div>";
+        echo "<div style='margin-bottom:20px; font-size:12px; color:#666; font-style:italic;'>Část rodin je na brigády přihlášena, přestože svůj požadavek hodin již splnila — jejich hodiny inkaso dále nesnižují.</div>";
 
         echo "<table class='sb-table'>";
         echo "<tr>
