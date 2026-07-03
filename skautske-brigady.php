@@ -162,6 +162,113 @@ function sb_export_brigada_csv() {
 }
 add_action('init', 'sb_export_brigada_csv');
 
+function sb_export_prezencni_listina() {
+    if (!isset($_GET['sb_export']) || $_GET['sb_export'] !== 'prezencni_listina') return;
+    if (!isset($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'sb_prezencni_listina')) {
+        wp_die('Neplatný bezpečnostní token.');
+    }
+    $roles = wp_get_current_user()->roles;
+    if (!array_intersect($roles, ['administrator', 'spravce_brigad', 'author'])) {
+        wp_die('Nemáš oprávnění.');
+    }
+    $brigada_id = isset($_GET['brigada_id']) ? intval($_GET['brigada_id']) : 0;
+    if (!$brigada_id) wp_die('Neplatné ID brigády.');
+    $brigada_post = get_post($brigada_id);
+    if (!$brigada_post || $brigada_post->post_type !== 'brigada') wp_die('Brigáda nenalezena.');
+
+    $nazev     = $brigada_post->post_title;
+    $datum_raw = get_post_meta($brigada_id, 'datum_brigady', true);
+    $datum_fmt = $datum_raw ? date_i18n('j. n. Y', strtotime($datum_raw)) : '';
+    $misto     = get_post_meta($brigada_id, 'misto_konani', true);
+    $cas       = get_post_meta($brigada_id, 'cas_brigady', true);
+
+    $rodiny  = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+    $walkins = get_post_meta($brigada_id, 'walkin_ucastnici', true);
+    if (!is_array($walkins)) $walkins = [];
+    $walkin_jmena = array_column($walkins, 'jmeno');
+
+    $radky = [];
+    $jmena_prihlasenych = [];
+    foreach ($rodiny as $r) {
+        $pocet = intval(get_post_meta($brigada_id, 'ucastnici_' . $r->ID, true));
+        if (!$pocet) continue;
+        $radky[] = ['jmeno' => $r->post_title, 'osob' => $pocet];
+        $jmena_prihlasenych[] = $r->post_title;
+    }
+    foreach ($walkins as $w) {
+        if (in_array($w['jmeno'], $jmena_prihlasenych, true)) continue;
+        $radky[] = ['jmeno' => $w['jmeno'], 'osob' => max(1, intval($w['pocet'] ?? 1))];
+    }
+    usort($radky, fn($a, $b) => strcmp(mb_strtolower($a['jmeno']), mb_strtolower($b['jmeno'])));
+
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Prezenční listina – <?php echo esc_html($nazev); ?></title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 20px 30px; max-width: 900px; }
+h1 { font-size: 20px; margin-bottom: 6px; }
+.meta { font-size: 13px; color: #444; margin-bottom: 20px; line-height: 1.8; }
+table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+th, td { border: 1px solid #555; padding: 7px 10px; vertical-align: middle; }
+th { background: #e8e8e8; font-weight: bold; text-align: center; font-size: 12px; }
+td.rodina { font-weight: 600; }
+td.ucastnik { text-align: center; color: #555; font-size: 12px; width: 70px; }
+td.cas { width: 120px; height: 30px; }
+td.podpis { width: 200px; }
+.btn-row { margin-bottom: 18px; }
+.btn-print { background: #1565c0; color: #fff; border: none; padding: 9px 22px; font-size: 14px; border-radius: 4px; cursor: pointer; }
+@media print {
+    .btn-row { display: none; }
+    body { padding: 8px 12px; }
+    th { background: #e0e0e0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<div class="btn-row">
+    <button class="btn-print" onclick="window.print()">🖨️ Tisk / Uložit jako PDF</button>
+</div>
+<h1><?php echo esc_html($nazev); ?></h1>
+<div class="meta">
+    <?php if ($datum_fmt): ?>📅 <?php echo esc_html($datum_fmt); ?><br><?php endif; ?>
+    <?php if ($misto): ?>📍 <?php echo esc_html($misto); ?><br><?php endif; ?>
+    <?php if ($cas): ?>⏰ <?php echo esc_html($cas); ?><?php endif; ?>
+</div>
+<table>
+    <tr>
+        <th style="width:200px; text-align:left;">Rodina</th>
+        <th style="width:70px;">Účastník</th>
+        <th style="width:120px;">Čas příchodu</th>
+        <th style="width:120px;">Čas odchodu</th>
+        <th style="width:200px;">Podpis</th>
+    </tr>
+    <?php foreach ($radky as $rl): ?>
+        <?php for ($i = 1; $i <= $rl['osob']; $i++): ?>
+        <tr>
+            <?php if ($i === 1): ?>
+            <td class="rodina" rowspan="<?php echo intval($rl['osob']); ?>"><?php echo esc_html($rl['jmeno']); ?></td>
+            <?php endif; ?>
+            <td class="ucastnik">č.&nbsp;<?php echo $i; ?></td>
+            <td class="cas"></td>
+            <td class="cas"></td>
+            <?php if ($i === 1): ?>
+            <td class="podpis" rowspan="<?php echo intval($rl['osob']); ?>"></td>
+            <?php endif; ?>
+        </tr>
+        <?php endfor; ?>
+    <?php endforeach; ?>
+</table>
+</body>
+</html>
+    <?php
+    exit;
+}
+add_action('init', 'sb_export_prezencni_listina');
+
 // Vrátí celkový počet odpracovaných hodin rodiny na brigádě.
 // Podporuje starý formát (h/os. × počet) i nový (individuální hodiny na osobu).
 function sb_celkem_hodin($brigada_id, $rodina_id) {
@@ -642,9 +749,17 @@ if (isset($_POST['zobraz_ucast'])) {
             'brigada_id' => $id,
             '_wpnonce'   => wp_create_nonce('sb_export_brigada'),
         ]);
+        $pl_url = add_query_arg([
+            'sb_export'  => 'prezencni_listina',
+            'brigada_id' => $id,
+            '_wpnonce'   => wp_create_nonce('sb_prezencni_listina'),
+        ]);
         echo "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:20px; margin-bottom:8px;'>";
         echo "<h5 class='sb-card-title' style='margin:0;'>👥 Přehled účastníků</h5>";
+        echo "<div style='display:flex; gap:8px;'>";
+        echo "<a href='" . esc_url($pl_url) . "' target='_blank' class='sb-btn sb-btn-secondary sb-btn-sm'>📋 Prezenční listina</a>";
         echo "<a href='" . esc_url($export_url) . "' class='sb-btn sb-btn-secondary sb-btn-sm'>📥 Stáhnout Excel (CSV)</a>";
+        echo "</div>";
         echo "</div>";
         echo "<table class='sb-table'>";
         echo "<tr><th>Rodina / jméno</th><th class='center'>Osob</th><th class='center'>Hod./os.</th><th class='center'>Celkem odpracováno</th><th>Způsob přihlášení</th></tr>";
