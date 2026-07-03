@@ -267,7 +267,7 @@ td.podpis { width: 200px; }
     <?php for ($w = 0; $w < 10; $w++): ?>
     <tr>
         <td class="cas"></td>
-        <td class="ucastnik" style="color:#bbb;">walk-in</td>
+        <td class="cas"></td>
         <td class="cas"></td>
         <td class="cas"></td>
         <td class="podpis"></td>
