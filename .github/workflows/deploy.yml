@@ -11,9 +11,4 @@ jobs:
     steps:
       - name: Zavolej deploy webhook na serveru
         run: |
-          curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -H "X-Hub-Signature-256: sha256=$(echo -n '{}' | openssl dgst -sha256 -hmac '${{ secrets.DEPLOY_SECRET }}' | sed 's/.*= //')" \
-            -d '{}' \
-            https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php
+          curl -f "https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php?token=${{ secrets.DEPLOY_SECRET }}"
