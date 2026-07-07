@@ -504,6 +504,18 @@ if (array_intersect($roles, $allowed_limited)) {
             if (hash.startsWith('#sb-')) {
                 sbShowSection(hash.replace('#sb-', ''));
             }
+
+            // Obnov scroll pozici po POST (uložení formuláře)
+            const savedY = sessionStorage.getItem('sb_scroll_y');
+            if (savedY !== null) {
+                sessionStorage.removeItem('sb_scroll_y');
+                setTimeout(() => window.scrollTo({ top: parseInt(savedY), behavior: 'instant' }), 150);
+            }
+        });
+
+        // Uložení scroll pozice před odesláním formuláře
+        document.addEventListener('submit', function() {
+            sessionStorage.setItem('sb_scroll_y', window.scrollY);
         });
     </script>
     
