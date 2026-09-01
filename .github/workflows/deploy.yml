@@ -1,4 +1,4 @@
-name: Deploy – trigger webhook
+name: Deploy přes FTP
 
 on:
   push:
@@ -9,6 +9,17 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Zavolej deploy webhook na serveru
-        run: |
-          curl -f "https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php?token=${{ secrets.DEPLOY_SECRET }}"
+      - uses: actions/checkout@v4
+
+      - name: Nahrát na server přes FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./
+          server-dir: /wp-content/plugins/skautske-brigady/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            .github/**

@@ -64,6 +64,16 @@ function sb_export_rocni_vypis_csv() {
                 $celkem = sb_celkem_hodin($b->ID, $r->ID);
                 if ($celkem !== null) {
                     $odpracovano += $celkem;
+                } else {
+                    $walkins = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                    if (is_array($walkins)) {
+                        foreach ($walkins as $w) {
+                            if (($w['jmeno'] ?? '') === $r->post_title) {
+                                $odpracovano += max(1, intval($w['pocet'] ?? 1)) * intval($w['hodiny'] ?? 0);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
