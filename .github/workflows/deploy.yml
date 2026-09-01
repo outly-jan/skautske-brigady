@@ -23,3 +23,7 @@ jobs:
             **/.git*
             **/.git*/**
             .github/**
+
+      - name: Invalidovat PHP OPcache
+        run: |
+          curl -f "https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php?token=${{ secrets.DEPLOY_SECRET }}" || true
