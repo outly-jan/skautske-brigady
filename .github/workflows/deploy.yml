@@ -18,7 +18,7 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./
-          server-dir: /wp-content/plugins/skautske-brigady/
+          server-dir: public_html/wp-content/plugins/skautske-brigady/
           exclude: |
             **/.git*
             **/.git*/**
