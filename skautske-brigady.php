@@ -1879,21 +1879,24 @@ function sb_rocni_vypis() {
 
         echo "<table class='sb-table' id='sb-rocni-tabulka'>";
         echo "<thead><tr>
+            <th class='center'>#</th>
             <th>Rodina</th>
             <th>Děti</th>
             <th>Rodiče</th>
             <th class='center'>Počet dětí</th>
-            <th data-col='4' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Odpracováno (h) <span class='sb-si'></span></th>
-            <th data-col='5' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Požadavek (h) <span class='sb-si'></span></th>
-            <th data-col='6' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Rozdíl (h) <span class='sb-si'></span></th>
-            <th data-col='7' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Poplatek (Kč) <span class='sb-si'></span></th>
+            <th data-col='5' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Odpracováno (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='6' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Požadavek (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='7' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Rozdíl (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='8' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Poplatek (Kč) <span class='sb-si'> ↕</span></th>
             <th>Brigády</th>
         </tr></thead><tbody>";
 
+        $radek_cislo = 1;
         foreach ($radky as $z) {
             $trida_rozdil = $z['rozdil'] >= 0 ? 'green' : 'red';
             $brigady_str  = implode('<br>', $z['brigady_seznam']);
             echo "<tr>
+                <td class='center sb-rownum'>" . $radek_cislo++ . "</td>
                 <td>" . $z['nazev'] . "</td>
                 <td class='sb-small'>" . $z['jmena_deti'] . "</td>
                 <td class='sb-small'>" . $z['jmena_rodicu'] . "</td>
@@ -1916,7 +1919,7 @@ function sb_rocni_vypis() {
             var col = parseInt(th.getAttribute('data-col'));
             var type = th.getAttribute('data-type');
             if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
-            tbl.querySelectorAll('thead th .sb-si').forEach(function(s) { s.textContent = ''; });
+            tbl.querySelectorAll('thead th .sb-si').forEach(function(s) { s.textContent = ' ↕'; });
             th.querySelector('.sb-si').textContent = sortAsc ? ' ▲' : ' ▼';
             var tbody = tbl.querySelector('tbody');
             var rows = Array.from(tbody.querySelectorAll('tr'));
@@ -1931,6 +1934,10 @@ function sb_rocni_vypis() {
                 return 0;
             });
             rows.forEach(function(r) { tbody.appendChild(r); });
+            tbody.querySelectorAll('tr').forEach(function(r, i) {
+                var nc = r.querySelector('.sb-rownum');
+                if (nc) nc.textContent = i + 1;
+            });
         });
     });
 })();
