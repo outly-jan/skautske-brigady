@@ -16,9 +16,21 @@ if (!$content || strlen($content) < 10000) {
     exit('Download failed');
 }
 
-file_put_contents(__DIR__ . '/skautske-brigady.php', $content);
+$target = __DIR__ . '/skautske-brigady.php';
+$written = file_put_contents($target, $content);
+
+if ($written === false) {
+    http_response_code(500);
+    exit('Write failed – check file permissions on ' . $target);
+}
+
+if ($written !== strlen($content)) {
+    http_response_code(500);
+    exit('Write incomplete: wrote ' . $written . ' of ' . strlen($content) . ' bytes');
+}
+
 file_put_contents(__DIR__ . '/.sb_deploy_flag', time());
 if (function_exists('opcache_invalidate')) {
-    opcache_invalidate(__DIR__ . '/skautske-brigady.php', true);
+    opcache_invalidate($target, true);
 }
-echo 'OK – deployed ' . strlen($content) . ' bytes at ' . date('Y-m-d H:i:s');
+echo 'OK – deployed ' . $written . ' bytes at ' . date('Y-m-d H:i:s');
