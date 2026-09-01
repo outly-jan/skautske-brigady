@@ -1877,18 +1877,18 @@ function sb_rocni_vypis() {
             . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>";
         echo "<div style='margin-bottom:20px; font-size:12px; color:#666; font-style:italic;'>Část rodin je na brigády přihlášena, přestože svůj požadavek hodin již splnila — jejich hodiny inkaso dále nesnižují.</div>";
 
-        echo "<table class='sb-table'>";
-        echo "<tr>
+        echo "<table class='sb-table' id='sb-rocni-tabulka'>";
+        echo "<thead><tr>
             <th>Rodina</th>
             <th>Děti</th>
             <th>Rodiče</th>
             <th class='center'>Počet dětí</th>
-            <th class='center'>Odpracováno (h)</th>
-            <th class='center'>Požadavek (h)</th>
-            <th class='center'>Rozdíl (h)</th>
-            <th class='center'>Poplatek (Kč)</th>
+            <th data-col='4' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Odpracováno (h) <span class='sb-si'></span></th>
+            <th data-col='5' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Požadavek (h) <span class='sb-si'></span></th>
+            <th data-col='6' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Rozdíl (h) <span class='sb-si'></span></th>
+            <th data-col='7' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Poplatek (Kč) <span class='sb-si'></span></th>
             <th>Brigády</th>
-        </tr>";
+        </tr></thead><tbody>";
 
         foreach ($radky as $z) {
             $trida_rozdil = $z['rozdil'] >= 0 ? 'green' : 'red';
@@ -1898,14 +1898,43 @@ function sb_rocni_vypis() {
                 <td class='sb-small'>" . $z['jmena_deti'] . "</td>
                 <td class='sb-small'>" . $z['jmena_rodicu'] . "</td>
                 <td class='center'>" . $z['pocet_deti'] . "</td>
-                <td class='center'>" . $z['odpracovano'] . "</td>
-                <td class='center'>" . $z['pozadavek'] . "</td>
-                <td class='center $trida_rozdil'>" . intval($z['rozdil']) . "</td>
-                <td class='center'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
+                <td class='center' data-v='" . intval($z['odpracovano']) . "'>" . $z['odpracovano'] . "</td>
+                <td class='center' data-v='" . intval($z['pozadavek']) . "'>" . $z['pozadavek'] . "</td>
+                <td class='center $trida_rozdil' data-v='" . intval($z['rozdil']) . "'>" . intval($z['rozdil']) . "</td>
+                <td class='center' data-v='" . $z['poplatek'] . "'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
                 <td class='sb-small'>$brigady_str</td>
             </tr>";
         }
-        echo "</table>";
+        echo "</tbody></table>";
+        echo "<script>
+(function() {
+    var tbl = document.getElementById('sb-rocni-tabulka');
+    if (!tbl) return;
+    var sortCol = -1, sortAsc = true;
+    tbl.querySelectorAll('thead th[data-col]').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(th.getAttribute('data-col'));
+            var type = th.getAttribute('data-type');
+            if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+            tbl.querySelectorAll('thead th .sb-si').forEach(function(s) { s.textContent = ''; });
+            th.querySelector('.sb-si').textContent = sortAsc ? ' ▲' : ' ▼';
+            var tbody = tbl.querySelector('tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b) {
+                var aCell = a.querySelectorAll('td')[col];
+                var bCell = b.querySelectorAll('td')[col];
+                if (!aCell || !bCell) return 0;
+                var aVal = type === 'num' ? parseFloat(aCell.getAttribute('data-v') || 0) : aCell.textContent.trim().toLowerCase();
+                var bVal = type === 'num' ? parseFloat(bCell.getAttribute('data-v') || 0) : bCell.textContent.trim().toLowerCase();
+                if (aVal < bVal) return sortAsc ? -1 : 1;
+                if (aVal > bVal) return sortAsc ? 1 : -1;
+                return 0;
+            });
+            rows.forEach(function(r) { tbody.appendChild(r); });
+        });
+    });
+})();
+</script>";
 
         $export_url = add_query_arg([
             'sb_export' => 'rocni_vypis',
