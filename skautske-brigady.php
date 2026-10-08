@@ -47,8 +47,10 @@ function sb_export_rocni_vypis_csv() {
     fputcsv($output, ['Rodina', 'Děti', 'Počet dětí', 'Odpracováno (h)', 'Požadavek (h)', 'Rozdíl (h)', 'Poplatek (Kč)'], ';');
 
     foreach ($rodiny as $r) {
+        if (!sb_rodina_v_roce($r, $rok)) continue;
+
         $deti_meta  = get_post_meta($r->ID, 'deti_rodiny', true);
-        $pocet_deti = is_array($deti_meta) ? count($deti_meta) : 0;
+        $pocet_deti = sb_pocet_deti_pro_rok($r->ID, $rok);
 
         $pozadavek = 0;
         if ($poz_rok) {
@@ -305,8 +307,22 @@ function sb_celkem_hodin($brigada_id, $rodina_id) {
     return intval($h) * $n;
 }
 
+// Vrátí počet dětí rodiny pro daný rok — ze snímku, nebo aktuální počet jako záložní hodnotu.
+function sb_pocet_deti_pro_rok($rodina_id, $rok) {
+    $snapshot = get_post_meta($rodina_id, 'pocet_deti_' . intval($rok), true);
+    if ($snapshot !== '' && $snapshot !== false && $snapshot !== null) {
+        return intval($snapshot);
+    }
+    $deti = get_post_meta($rodina_id, 'deti_rodiny', true);
+    return is_array($deti) ? count($deti) : 0;
+}
 
-// SHORTCODE: hlavní rozhraní správce
+// Vrátí true, pokud rodina vznikla před koncem skautského roku X (tj. do 31. 8. roku X).
+function sb_rodina_v_roce($rodina, $rok) {
+    $konec_roku = new DateTime(intval($rok) . '-08-31 23:59:59');
+    $vznik      = new DateTime($rodina->post_date);
+    return $vznik <= $konec_roku;
+}
  function sb_spravce_brigad_shortcode() {
   $current_user = wp_get_current_user();
 $roles = $current_user->roles;
@@ -1688,6 +1704,65 @@ if (!$ma_data) {
 echo "</table>";
 echo "</div>";
 
+// === SNÍMEK POČTU DĚTÍ ===
+$rodiny_all = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+
+// Uložení automatického snímku
+if (isset($_POST['vytvorit_snapshot']) && isset($_POST['_wpnonce_snapshot']) &&
+    wp_verify_nonce($_POST['_wpnonce_snapshot'], 'sb_snapshot_' . $vybrany_rok)) {
+    foreach ($rodiny_all as $rr) {
+        if (!sb_rodina_v_roce($rr, $vybrany_rok)) continue;
+        $d = get_post_meta($rr->ID, 'deti_rodiny', true);
+        update_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, is_array($d) ? count($d) : 0);
+    }
+    echo "<div class='sb-alert sb-alert-success'>Snímek počtu dětí pro rok $vybrany_rok byl vytvořen.</div>";
+}
+
+// Uložení ručních úprav
+if (isset($_POST['ulozit_snapshot_rucne']) && isset($_POST['_wpnonce_snapshot']) &&
+    wp_verify_nonce($_POST['_wpnonce_snapshot'], 'sb_snapshot_' . $vybrany_rok)) {
+    foreach ($rodiny_all as $rr) {
+        $klic = 'snap_' . $rr->ID;
+        if (isset($_POST[$klic])) {
+            update_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, max(0, intval($_POST[$klic])));
+        }
+    }
+    echo "<div class='sb-alert sb-alert-success'>Snímek byl upraven.</div>";
+}
+
+$rodiny_v_roce = array_filter($rodiny_all, function($rr) use ($vybrany_rok) {
+    return sb_rodina_v_roce($rr, $vybrany_rok);
+});
+
+echo "<div class='sb-card'>";
+echo "<h4 class='sb-card-title'>👶 Snímek počtu dětí pro rok " . intval($vybrany_rok) . "</h4>";
+echo "<p class='sb-text-muted' style='margin-bottom:10px;'>Počet dětí použitý pro výpočet požadavků. Pokud snímek neexistuje, použije se aktuální stav rodiny.</p>";
+
+echo "<form method='post'>";
+wp_nonce_field('sb_snapshot_' . $vybrany_rok, '_wpnonce_snapshot');
+echo "<input type='hidden' name='vybrany_rok' value='" . intval($vybrany_rok) . "'>";
+echo "<div style='margin-bottom:10px;'><input type='submit' name='vytvorit_snapshot' value='📷 Vytvořit snímek ze současného stavu' class='sb-btn sb-btn-secondary'></div>";
+
+echo "<table class='sb-table' style='max-width:500px;'>";
+echo "<thead><tr><th>Rodina</th><th class='center'>Aktuálně dětí</th><th class='center'>Snímek pro " . intval($vybrany_rok) . "</th></tr></thead><tbody>";
+
+foreach ($rodiny_v_roce as $rr) {
+    $d_aktualni = get_post_meta($rr->ID, 'deti_rodiny', true);
+    $aktualne   = is_array($d_aktualni) ? count($d_aktualni) : 0;
+    $snap_raw   = get_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, true);
+    $snap       = ($snap_raw !== '' && $snap_raw !== false && $snap_raw !== null) ? intval($snap_raw) : null;
+    $snap_zobr  = $snap !== null ? $snap : '<em class="sb-text-muted">– (použije se ' . $aktualne . ')</em>';
+    echo "<tr>
+        <td>" . esc_html($rr->post_title) . "</td>
+        <td class='center'>$aktualne</td>
+        <td class='center'><input type='number' name='snap_{$rr->ID}' value='" . ($snap !== null ? $snap : $aktualne) . "' min='0' style='width:60px;'></td>
+    </tr>";
+}
+echo "</tbody></table>";
+echo "<div style='margin-top:10px;'><input type='submit' name='ulozit_snapshot_rucne' value='💾 Uložit úpravy snímku' class='sb-btn sb-btn-primary'></div>";
+echo "</form>";
+echo "</div>";
+
     return ob_get_clean();
 }
 
@@ -1733,11 +1808,13 @@ function sb_rocni_vypis() {
         $celkem_poplatek = 0;
         $radky = [];
         foreach ($rodiny as $r) {
+            if (!sb_rodina_v_roce($r, $vybrany_rok)) continue;
+
             $rodina_id = $r->ID;
             $nazev = esc_html($r->post_title);
             $deti = get_post_meta($rodina_id, 'deti_rodiny', true);
             $rodice = get_post_meta($rodina_id, 'rodice_rodiny', true);
-            $pocet_deti = is_array($deti) ? count($deti) : 0;
+            $pocet_deti = sb_pocet_deti_pro_rok($rodina_id, $vybrany_rok);
 
             $jmena_deti = '';
             if (is_array($deti)) {
@@ -2276,7 +2353,7 @@ function sb_moje_brigady_shortcode() {
 
     // --- Seznam dětí ---
     $deti       = get_post_meta($rodina_id, 'deti_rodiny', true);
-    $pocet_deti = is_array($deti) ? count($deti) : 0;
+    $pocet_deti = is_array($deti) ? count($deti) : 0; // aktuální počet (pro zobrazení)
 
     // --- Roční logika ---
     $tz        = wp_timezone();
@@ -2303,11 +2380,12 @@ function sb_moje_brigady_shortcode() {
     $sazba     = 0;
 
     if ($pozadavky_rok) {
-        if ($pocet_deti == 1) {
+        $pocet_deti_aktivni = sb_pocet_deti_pro_rok($rodina_id, $rok_aktivni);
+        if ($pocet_deti_aktivni == 1) {
             $pozadavek = intval($pozadavky_rok['1']);
-        } elseif ($pocet_deti == 2) {
+        } elseif ($pocet_deti_aktivni == 2) {
             $pozadavek = intval($pozadavky_rok['2']);
-        } elseif ($pocet_deti >= 3) {
+        } elseif ($pocet_deti_aktivni >= 3) {
             $pozadavek = intval($pozadavky_rok['3']);
         }
         $sazba = isset($pozadavky_rok['sazba']) ? floatval($pozadavky_rok['sazba']) : 0;
@@ -2449,11 +2527,12 @@ function sb_moje_brigady_shortcode() {
     $poplatek_druhy  = 0;
 
     if ($rok_druhy && $pozadavky_druhy) {
-        if ($pocet_deti == 1) {
+        $pocet_deti_druhy = sb_pocet_deti_pro_rok($rodina_id, $rok_druhy);
+        if ($pocet_deti_druhy == 1) {
             $pozadavek_druhy = intval($pozadavky_druhy['1']);
-        } elseif ($pocet_deti == 2) {
+        } elseif ($pocet_deti_druhy == 2) {
             $pozadavek_druhy = intval($pozadavky_druhy['2']);
-        } elseif ($pocet_deti >= 3) {
+        } elseif ($pocet_deti_druhy >= 3) {
             $pozadavek_druhy = intval($pozadavky_druhy['3']);
         }
         $sazba_druhy    = isset($pozadavky_druhy['sazba']) ? floatval($pozadavky_druhy['sazba']) : 0;
