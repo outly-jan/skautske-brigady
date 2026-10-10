@@ -2594,7 +2594,7 @@ function sb_moje_brigady_shortcode() {
     echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;'>";
 
     $barva_zbyva = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
-    echo "<div style='flex:0 0 auto; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
+    echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
     echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
     if (!$v_aktivnim_roce) {
         $rok_next = $rok_aktivni + 1;
@@ -2610,7 +2610,7 @@ function sb_moje_brigady_shortcode() {
 
     if ($rok_druhy) {
         $barva_zbyva_d = ($zbyva_druhy === 0) ? '#2e7d32' : '#c0392b';
-        echo "<div style='flex:0 0 auto; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
+        echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
         echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_druhy</div>";
         echo "<table class='sbf-req-table'>";
         echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
@@ -2923,7 +2923,7 @@ function sb_rodiny_dle_brigad_tab() {
     echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;'>";
 
     $barva_z = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
-    echo "<div style='border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
+    echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
     echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
     if (!$v_aktivnim_roce) {
         $rok_next = $rok_aktivni + 1;
@@ -2939,7 +2939,7 @@ function sb_rodiny_dle_brigad_tab() {
 
     if ($rok_druhy && $pozadavky_druhy) {
         $barva_zd = ($zbyva_druhy === 0) ? '#2e7d32' : '#c0392b';
-        echo "<div style='border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
+        echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
         echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_druhy</div><table class='sbf-req-table'>";
         echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
