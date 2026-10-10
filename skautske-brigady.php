@@ -2372,6 +2372,9 @@ function sb_moje_brigady_shortcode() {
         $rok_druhy   = null;
     }
 
+    $rodina_obj      = get_post($rodina_id);
+    $v_aktivnim_roce = sb_rodina_v_roce($rodina_obj, $rok_aktivni);
+
     // --- Požadavky pro aktivní rok ---
     $pozadavky_vse = get_option('pozadavky_dle_roku', []);
     $pozadavky_rok = isset($pozadavky_vse[$rok_aktivni]) ? $pozadavky_vse[$rok_aktivni] : null;
@@ -2379,7 +2382,7 @@ function sb_moje_brigady_shortcode() {
     $pozadavek = 0;
     $sazba     = 0;
 
-    if ($pozadavky_rok) {
+    if ($pozadavky_rok && $v_aktivnim_roce) {
         $pocet_deti_aktivni = sb_pocet_deti_pro_rok($rodina_id, $rok_aktivni);
         if ($pocet_deti_aktivni == 1) {
             $pozadavek = intval($pozadavky_rok['1']);
@@ -2593,6 +2596,10 @@ function sb_moje_brigady_shortcode() {
     $barva_zbyva = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
     echo "<div style='flex:0 0 auto; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
     echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
+    if (!$v_aktivnim_roce) {
+        $rok_next = $rok_aktivni + 1;
+        echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>Rodina vznikla po 31. 8. $rok_aktivni — patří do sezóny $rok_aktivni/$rok_next. Požadavky platí od roku $rok_next.</p>";
+    }
     echo "<table class='sbf-req-table'>";
     echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
@@ -2792,10 +2799,13 @@ function sb_rodiny_dle_brigad_tab() {
         $rok_aktivni = $rok_nyni; $rok_druhy = null;
     }
 
+    $vybrana_rodina_obj = get_post($vybrana_rodina_id);
+    $v_aktivnim_roce    = sb_rodina_v_roce($vybrana_rodina_obj, $rok_aktivni);
+
     $pozadavky_vse = get_option('pozadavky_dle_roku', []);
     $pozadavky_rok = isset($pozadavky_vse[$rok_aktivni]) ? $pozadavky_vse[$rok_aktivni] : null;
     $pozadavek = $sazba = 0;
-    if ($pozadavky_rok) {
+    if ($pozadavky_rok && $v_aktivnim_roce) {
         $pozadavek = intval($pozadavky_rok[min($pocet_deti, 3)] ?? 0);
         $sazba     = floatval($pozadavky_rok['sazba'] ?? 0);
     }
@@ -2914,7 +2924,12 @@ function sb_rodiny_dle_brigad_tab() {
 
     $barva_z = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
     echo "<div style='border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
-    echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div><table class='sbf-req-table'>";
+    echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
+    if (!$v_aktivnim_roce) {
+        $rok_next = $rok_aktivni + 1;
+        echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>Rodina vznikla po 31. 8. $rok_aktivni — patří do sezóny $rok_aktivni/$rok_next. Požadavky platí od roku $rok_next.</p>";
+    }
+    echo "<table class='sbf-req-table'>";
     echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_z) . ";'>$zbyva h</strong></td></tr>";
