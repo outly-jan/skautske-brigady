@@ -10,18 +10,27 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 
 - Zakládání a správa brigád (datum, čas, místo, délka, vhodnost)
 - Správa rodin — eviduje rodiče i děti včetně oddílové příslušnosti
-- Nastavení ročních požadavků na hodiny dle počtu dětí v rodině a hodinové sazby za nesplnění
-- Evidence skutečně odpracovaných hodin (registrovaní i neregistrovaní účastníci)
-- Roční výpis plnění povinností pro každou rodinu
-- Export do CSV (roční přehled, účastníci konkrétní brigády)
+- Nastavení ročních požadavků na hodiny dle počtu dětí v rodině (1, 2, 3+ děti) a hodinové sazby za nesplnění
+- **Skautský rok**: požadavky se vztahují jen na rodiny vzniklé do 31. 8. daného roku; počet dětí se snímkuje ke konci sezóny (tlačítkem nebo ručně)
+- Evidence skutečně odpracovaných hodin (registrovaní i neregistrovaní walk-in účastníci)
+- Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku
+- Export do CSV (roční přehled, účastníci konkrétní brigády, prezenční listina)
+- Admin přehled brigád dle rodiny (read-only)
 - 24hodinové upomínky správcům před nadcházející brigádou (WP-Cron)
 
 ### Pro rodiče
 
-- Přehled nadcházejících brigád a přihlašování na ně
+- Přehled nadcházejících brigád a přihlašování na ně (včetně počtu osob)
 - Změna nebo zrušení přihlášky
-- Průběžný přehled odpracovaných hodin vůči ročnímu požadavku
+- Průběžný přehled odpracovaných hodin vůči ročnímu požadavku, zbývajícím hodinám a případnému poplatku
 - E-mailové potvrzení při každé změně přihlášky
+- Rodiny vzniklé po 31. 8. aktuálního roku vidí nulový požadavek s vysvětlením, do které sezóny patří
+
+## Skautský rok
+
+Skautská sezóna X probíhá od 1. 9. roku X−1 do 31. 8. roku X. Požadavky na rok X se vztahují pouze na rodiny, které vznikly (datum vytvoření WordPress příspěvku) nejpozději 31. 8. roku X.
+
+Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke konci sezóny (post meta `pocet_deti_{rok}`). Pokud snímek neexistuje, použije se aktuální počet dětí jako záložní hodnota. Snímky spravuje správce v záložce *Nastavit požadavky dle roku* — hromadně tlačítkem nebo ručně po rodinách.
 
 ## Požadavky
 
@@ -43,7 +52,7 @@ Plugin funguje prostřednictvím shortcodes vložených na libovolné stránky W
 |---|---|---|
 | `[spravce_brigad]` | správci / administrátoři | Plný správcovský panel |
 | `[moje_brigady]` | rodiče (role `rodic`) | Panel rodiče — přihlašování a přehled plnění |
-| `[sb_prehled_brigad]` | veřejnost | Seznam nadcházejících brigád (jen pro čtení) |
+| `[prehled_brigad]` nebo `[sb_prehled_brigad]` | veřejnost | Seznam nadcházejících brigád (jen pro čtení) |
 
 ### Uživatelské role
 
@@ -58,8 +67,18 @@ Plugin respektuje tyto role:
 
 ```
 skautske-brigady/
-└── skautske-brigady.php   # celý plugin (jediný soubor, ~2 750 řádků)
+├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~3 600 řádků)
+└── deploy-webhook.php     # webhook pro invalidaci PHP OPcache po nasazení
 ```
+
+## Nasazení
+
+Plugin se nasazuje automaticky přes GitHub Actions při každém pushu do větve `main`:
+
+1. **FTP Deploy** — soubory se nahrají na server do `public_html/wp-content/plugins/skautske-brigady/`
+2. **OPcache invalidace** — po nahrání se zavolá `deploy-webhook.php`, který zajistí, že PHP server načte novou verzi pluginu okamžitě
+
+Token webhooku (`DEPLOY_SECRET`) musí být nastaven v GitHub Secrets a shodovat se s hodnotou definovanou přímo na serveru v `deploy-webhook.php`. Soubor v repozitáři obsahuje pouze zástupný token `CHANGE_ME`.
 
 ## Autor
 
