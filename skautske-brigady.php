@@ -407,6 +407,18 @@ function sb_muze_upravovat_rodiny() {
     return $revize['otevrena'];
 }
 
+// Pokud pro $rok už existuje snímek počtu dětí, upraví ho o změnu počtu dětí ve stavu rodiny
+// ($pred = počet ze stavu před úpravou). Ruční úpravy snímku tím zůstanou zachovány.
+function sb_uprav_snimek_o_rozdil($rodina_id, $rok, $pred) {
+    $klic = 'pocet_deti_' . intval($rok);
+    $snap = get_post_meta($rodina_id, $klic, true);
+    if ($snap === '' || $snap === false || $snap === null) return;
+    $rozdil = sb_pocet_deti_ze_stavu($rodina_id, $rok) - intval($pred);
+    if ($rozdil !== 0) {
+        update_post_meta($rodina_id, $klic, max(0, intval($snap) + $rozdil));
+    }
+}
+
 // Vrátí post rodiny podle ID, nebo null, pokud ID nepatří rodině.
 function sb_get_rodina($id) {
     $p = get_post(intval($id));
@@ -2439,6 +2451,8 @@ function sb_prehled_rodin() {
                     if ($chyba !== '') {
                         $zprava .= sb_alert($chyba, 'error');
                     } else {
+                        $rok_snimku  = sb_rok_archivace();
+                        $pred_snimek = sb_pocet_deti_ze_stavu($id, $rok_snimku);
                         wp_update_post(['ID' => $id, 'post_title' => $nazev]);
                         update_post_meta($id, 'rodice_rodiny', $vybrani_rodice);
                         update_post_meta($id, 'deti_rodiny', array_values($aktivni));
@@ -2449,6 +2463,7 @@ function sb_prehled_rodin() {
                             update_post_meta($id, 'deti_archiv', array_values($archiv_final));
                         }
                         delete_post_meta($id, 'pocet_deti'); // úklid starého pole, pokud existuje
+                        sb_uprav_snimek_o_rozdil($id, $rok_snimku, $pred_snimek);
                         $zprava .= sb_alert('Rodina byla upravena.');
                         if (empty($aktivni)) {
                             $zprava .= sb_alert('Rodina nemá žádné aktivní dítě. Pokud už skauta nenavštěvuje nikdo z rodiny, přesuňte celou rodinu do archivu.', 'warning');
@@ -2507,8 +2522,11 @@ function sb_prehled_rodin() {
                     $index = intval($_POST['smazat_dite']);
                     $deti  = get_post_meta($id, 'deti_rodiny', true);
                     if (is_array($deti) && isset($deti[$index])) {
+                        $rok_snimku  = sb_rok_archivace();
+                        $pred_snimek = sb_pocet_deti_ze_stavu($id, $rok_snimku);
                         unset($deti[$index]);
                         update_post_meta($id, 'deti_rodiny', array_values($deti));
+                        sb_uprav_snimek_o_rozdil($id, $rok_snimku, $pred_snimek);
                         $zprava .= sb_alert('Dítě bylo odebráno.');
                         $otevrena_id = $id;
                     }

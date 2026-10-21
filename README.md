@@ -58,7 +58,7 @@ Datový model: archivované děti jsou v post meta `deti_archiv` (`jmeno`, `oddi
 
 1. Zkopíruj složku `skautske-brigady` do `/wp-content/plugins/`.
 2. V administraci WordPressu přejdi na **Pluginy → Nainstalované pluginy** a plugin aktivuj.
-3. Po aktivaci jsou automaticky zaregistrovány vlastní typy příspěvků `brigada` a `rodina`.
+3. Brigády a rodiny se ukládají jako příspěvky typu `brigada` a `rodina`. Plugin tyto typy neregistruje (WordPress je umí uložit i bez registrace), proto se nezobrazují v menu wp-adminu a spravují se jen přes stránky pluginu.
 
 ## Použití
 
