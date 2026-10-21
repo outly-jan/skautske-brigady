@@ -694,6 +694,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
             <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
+    <button onclick="sbShowSection('napoveda')">📘 Nápověda</button>
     <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
     <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
@@ -809,6 +810,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
+            <div id="sb-napoveda" class="<?php echo ($aktivni_sekce === 'napoveda') ? 'sb-active' : ''; ?>"><?php echo sb_napoveda_vedouci(); ?></div>
             <div id="sb-rodiny" class="<?php echo ($aktivni_sekce === 'rodiny') ? 'sb-active' : ''; ?>"><?php echo sb_vytvorit_rodinu(); ?></div>
             <div id="sb-prehled" class="<?php echo ($aktivni_sekce === 'prehled') ? 'sb-active' : ''; ?>"><?php echo sb_prehled_rodin(); ?></div>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
@@ -1658,6 +1660,91 @@ function sb_sprava_ucastniku() {
     return ob_get_clean();
 }
 
+
+// Nápověda pro vedoucí (role author) – jen části, které se jich týkají.
+function sb_napoveda_vedouci() {
+    $revize = sb_revize_stav();
+    ob_start();
+    echo "<h3 class='sb-section-title'>📘 Nápověda pro vedoucí</h3>";
+
+    if ($revize['otevrena']) {
+        echo sb_alert('Revize rodin je teď otevřená – rodiny můžete upravovat a zakládat. Změny se projeví v brigádnických požadavcích od roku ' . intval($revize['rok']) . '.', 'warning');
+    } else {
+        echo sb_alert('Revize rodin je teď uzavřená – rodiny můžete jen prohlížet. Úpravy se otevřou, až správce revizi zahájí.', 'info');
+    }
+    ?>
+    <div class="sb-card">
+        <h4 class="sb-card-title">🗂️ Co je revize rodin</h4>
+        <p>Jednou ročně (obvykle v říjnu a listopadu) správce vyhlásí <strong>revizi rodin</strong>. Během ní projdete rodiny svého oddílu a opravíte, co nesedí: kdo už do skauta nechodí, kdo nově přibyl, kdo změnil oddíl.</p>
+        <ul>
+            <li>Rodiny můžete <strong>upravovat a zakládat jen během revize</strong>. Mimo ni je vidíte jen pro čtení.</li>
+            <li>Brigádnické hodiny se počítají za <strong>kalendářní rok</strong>. Vaše změny se proto projeví až <strong>od příštího roku</strong> – letošní požadavky rodin se nezmění.</li>
+            <li>Nic se nemaže. Děti a rodiny, které už nechodí, se jen přesunou do archivu a dají se kdykoli vrátit.</li>
+        </ul>
+    </div>
+
+    <div class="sb-card">
+        <h4 class="sb-card-title">👥 Správa rodin – úprava rodiny krok za krokem</h4>
+        <ol>
+            <li>Rodinu najdete nejrychleji v poli <strong>🔍 Hledat</strong> – stačí napsat část příjmení rodiny, jméno rodiče nebo dítěte.</li>
+            <li>Na kartě rodiny klikněte na <strong>✏️ Upravit</strong>. Karta se rozbalí.</li>
+            <li>Opravte, co je potřeba:
+                <ul>
+                    <li><strong>Jméno nebo oddíl dítěte</strong> – přepište jméno nebo vyberte oddíl ze seznamu.</li>
+                    <li><strong>Nové dítě</strong> – vyplňte jméno do prázdného řádku „Přidat dítě" a vyberte oddíl. Rodina může mít nejvýše 4 děti.</li>
+                    <li><strong>Dítě už nechodí</strong> – zaškrtněte <strong>Už nechodí</strong>. Do poznámky můžete napsat důvod (např. „přešel do jiného střediska").</li>
+                    <li><strong>Rodiče</strong> – zaškrtněte rodiče, kteří do rodiny patří.</li>
+                </ul>
+            </li>
+            <li>Klikněte na <strong>💾 Uložit rodinu</strong>. Karta se sbalí a krátce se zeleně orámuje – uloženo.</li>
+        </ol>
+        <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
+        <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>
+    </div>
+
+    <div class="sb-card">
+        <h4 class="sb-card-title">📦 Celá rodina už do skauta nechodí</h4>
+        <ol>
+            <li>Rozbalte kartu rodiny (<strong>✏️ Upravit</strong>).</li>
+            <li>Úplně dole můžete vyplnit poznámku a kliknout na <strong>📦 Přesunout rodinu do archivu</strong>.</li>
+        </ol>
+        <p>Rodina pak zmizí z přehledu a najdete ji dole na stránce v sekci <strong>📦 Archiv rodin</strong>. Tam ji lze tlačítkem <strong>↩️ Obnovit z archivu</strong> vrátit zpět.</p>
+        <p>Smazat rodinu nebo dítě natrvalo může jen správce.</p>
+    </div>
+
+    <div class="sb-card">
+        <h4 class="sb-card-title">➕ Vytvořit rodinu (nová rodina)</h4>
+        <ol>
+            <li>Zadejte <strong>název rodiny</strong> – obvykle příjmení v množném čísle, např. „Novákovi". Název nesmí být stejný jako u jiné rodiny.</li>
+            <li>Zaškrtněte <strong>rodiče</strong>. Pokud rodič v seznamu chybí, ještě se nezaregistroval na webu – nevadí, rodinu založte bez něj.</li>
+            <li>Klikněte na <strong>➕ Vytvořit rodinu</strong>.</li>
+            <li><strong>Děti přidáte potom</strong> v záložce <em>Správa rodin</em>: najděte novou rodinu, klikněte na Upravit a vyplňte děti.</li>
+        </ol>
+        <p>Nová rodina založená v průběhu sezóny bude mít brigádnický požadavek až od příštího roku.</p>
+    </div>
+
+    <div class="sb-card">
+        <h4 class="sb-card-title">⚠️ Když se objeví chyba</h4>
+        <ul>
+            <li><strong>„Rodina byla mezitím změněna jiným uživatelem…"</strong> – rodinu ve stejnou chvíli upravoval někdo jiný (nebo se formulář odeslal dvakrát). Obnovte stránku a úpravu zopakujte.</li>
+            <li><strong>„Někteří vybraní rodiče už patří do jiné rodiny"</strong> – rodič je přiřazený jinde. Napište správci.</li>
+            <li><strong>„Úpravy rodin jsou teď uzavřené"</strong> – revize skončila nebo ještě nezačala.</li>
+        </ul>
+    </div>
+
+    <div class="sb-card">
+        <h4 class="sb-card-title">📊 Ostatní záložky (jen pro čtení)</h4>
+        <ul>
+            <li><strong>🧮 Účastníci dle brigád</strong> – vyberte brigádu a uvidíte, kdo je přihlášený a kolik hodin odpracoval. Odtud si stáhnete <strong>prezenční listinu</strong>, <strong>Excel (CSV)</strong> a zkopírujete <strong>e-maily</strong> přihlášených rodin.</li>
+            <li><strong>👪 Rodiny dle brigád</strong> – vyberte rodinu a uvidíte její brigády a kolik hodin jí ještě zbývá.</li>
+            <li><strong>📊 Roční výpis</strong> – vyberte rok a uvidíte přehled všech rodin. Kliknutím na záhlaví sloupců <em>Odpracováno, Požadavek, Rozdíl, Poplatek</em> tabulku seřadíte. Výpis stáhnete tlačítkem <strong>📥 Exportovat CSV</strong> (otevře se v Excelu).</li>
+        </ul>
+    </div>
+
+    <p class="sb-text-muted">Je něco nejasné nebo nefunguje? Helpdesk: Honza Outlý – outly@skaut.cz, tel. 777 640 504.</p>
+    <?php
+    return ob_get_clean();
+}
 
 function sb_vytvorit_rodinu() {
     if (!sb_muze_videt_rodiny()) {
