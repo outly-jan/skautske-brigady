@@ -79,6 +79,12 @@ Plugin respektuje tyto role:
 - **author** (vedoucí) — přehled účastníků, roční výpis, prohlížení rodin; úpravy a zakládání rodin jen při otevřené revizi
 - **rodic** — panel rodiče
 
+### Cache stránek
+
+Web používá page cache (WP Super Cache) nastavenou tak, že přihlášeným uživatelům se cache nikdy neservíruje. Stránky s `[spravce_brigad]` a `[moje_brigady]` jsou dostupné jen přihlášeným, takže je cache neovlivní.
+
+Stránka s `[prehled_brigad]` (`/vypsane-brigady/`) je veřejná a zobrazuje počet přihlášených osob, který se mění přihláškami, ne úpravou stránky. Cache by ho neobnovila, a stránka je proto v nastavení WP Super Cache vyřazena z cache (*Odmítnuté řetězce URL*). Při změně adresy stránky nebo přechodu na jiný cache plugin je potřeba vyřazení nastavit znovu.
+
 ## Struktura projektu
 
 ```
