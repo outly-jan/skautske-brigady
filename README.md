@@ -9,7 +9,9 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 ### Pro správce
 
 - Zakládání a správa brigád (datum, čas, místo, délka, vhodnost)
-- Správa rodin — eviduje rodiče i děti včetně oddílové příslušnosti
+- Správa rodin — přehled karet (rodina, rodiče, děti a oddíl), úpravy přímo na kartě, vyhledávání, vhodné i pro mobil
+- Archiv: děti, které už skauta nenavštěvují, i celé rodiny se přesouvají do archivu (data se nemažou) a od příštího roku se nepočítají do požadavků
+- Revize rodin: správce zahájí/ukončí revizi, během níž mohou rodiny upravovat i vedoucí (role `author`)
 - Nastavení ročních požadavků na hodiny dle počtu dětí v rodině (1, 2, 3+ děti) a hodinové sazby za nesplnění
 - **Skautský rok**: požadavky se vztahují jen na rodiny vzniklé do 31. 8. daného roku; počet dětí se snímkuje ke konci sezóny (tlačítkem nebo ručně)
 - Evidence skutečně odpracovaných hodin (registrovaní i neregistrovaní walk-in účastníci)
@@ -31,6 +33,18 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 Skautská sezóna X probíhá od 1. 9. roku X−1 do 31. 8. roku X. Požadavky na rok X se vztahují pouze na rodiny, které vznikly (datum vytvoření WordPress příspěvku) nejpozději 31. 8. roku X.
 
 Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke konci sezóny (post meta `pocet_deti_{rok}`). Pokud snímek neexistuje, použije se aktuální počet dětí jako záložní hodnota. Snímky spravuje správce v záložce *Nastavit požadavky dle roku* — hromadně tlačítkem nebo ručně po rodinách.
+
+## Revize rodin a archiv
+
+Členství vedoucí evidují po skautských sezónách (1. 9.–31. 8.), brigádnické požadavky se ale počítají na kalendářní rok. Proto se používá **revize**:
+
+1. Správce v záložce *Nastavit požadavky dle roku* **zahájí revizi** (doporučeno v říjnu). Tím se zmrazí snímek počtu dětí pro aktuální rok a vedoucí (role `author`) získají možnost rodiny upravovat a zakládat. Změny se projeví od **příštího roku**.
+2. Vedoucí u dětí, které už nechodí, zaškrtnou *Už nechodí* (volitelně s poznámkou), případně přesunou celou rodinu do archivu, upraví oddíly a přidají nové děti.
+3. Správce revizi **ukončí** (nejpozději do konce listopadu — v prosinci rodiče vidí požadavky na příští rok). Vytvoří se snímek počtu dětí pro příští rok pouze z aktivních dětí a vedoucí už rodiny upravovat nemohou.
+
+Mimo revizi mohou rodiny upravovat jen správce. Trvalé smazání dítěte nebo rodiny je vyhrazeno správcům.
+
+Datový model: archivované děti jsou v post meta `deti_archiv` (`jmeno`, `oddil`, `od_roku`, `poznamka`, `datum`), archivovaná rodina má `rodina_archiv` (`od_roku`, `poznamka`, `datum`), stav revize je v option `sb_revize`. Pole `deti_rodiny` obsahuje vždy jen aktivní děti.
 
 ## Požadavky
 
@@ -60,14 +74,14 @@ Plugin respektuje tyto role:
 
 - **administrator** — plný přístup
 - **spravce_brigad** — správce brigád, plný přístup ke správcovskému panelu
-- **author** — omezený přístup (jen přehled účastníků a roční výpis)
+- **author** (vedoucí) — přehled účastníků, roční výpis, prohlížení rodin; úpravy a zakládání rodin jen při otevřené revizi
 - **rodic** — panel rodiče
 
 ## Struktura projektu
 
 ```
 skautske-brigady/
-├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~3 600 řádků)
+├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~4 100 řádků)
 └── deploy-webhook.php     # webhook pro invalidaci PHP OPcache po nasazení
 ```
 
@@ -75,8 +89,9 @@ skautske-brigady/
 
 Plugin se nasazuje automaticky přes GitHub Actions při každém pushu do větve `main`:
 
-1. **FTP Deploy** — soubory se nahrají na server do `public_html/wp-content/plugins/skautske-brigady/`
-2. **OPcache invalidace** — po nahrání se zavolá `deploy-webhook.php`, který zajistí, že PHP server načte novou verzi pluginu okamžitě
+1. **Kontrola syntaxe** — `php -l` na obou PHP souborech; při chybě se nic nenahraje
+2. **FTP Deploy** — soubory se nahrají na server do `public_html/wp-content/plugins/skautske-brigady/`
+3. **OPcache invalidace** — po nahrání se zavolá `deploy-webhook.php`, který zajistí, že PHP server načte novou verzi pluginu okamžitě
 
 Token webhooku (`DEPLOY_SECRET`) musí být nastaven v GitHub Secrets a shodovat se s hodnotou definovanou přímo na serveru v `deploy-webhook.php`. Soubor v repozitáři obsahuje pouze zástupný token `CHANGE_ME`.
 
