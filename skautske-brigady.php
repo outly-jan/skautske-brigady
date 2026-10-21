@@ -2307,7 +2307,8 @@ function sb_prehled_rodin() {
     });
 
     $zprava      = '';
-    $otevrena_id = 0;
+    $otevrena_id = 0; // karta, která zůstane rozbalená (chyba při uložení)
+    $ulozena_id  = 0; // karta, která se po úspěšném uložení zvýrazní (sbalená)
 
     // ---------------------------------------------------------------
     // Zpracování akcí
@@ -2450,7 +2451,9 @@ function sb_prehled_rodin() {
 
                     if ($chyba !== '') {
                         $zprava .= sb_alert($chyba, 'error');
+                        $otevrena_id = $id;
                     } else {
+                        $ulozena_id  = $id;
                         $rok_snimku  = sb_rok_archivace();
                         $pred_snimek = sb_pocet_deti_ze_stavu($id, $rok_snimku);
                         wp_update_post(['ID' => $id, 'post_title' => $nazev]);
@@ -2469,7 +2472,6 @@ function sb_prehled_rodin() {
                             $zprava .= sb_alert('Rodina nemá žádné aktivní dítě. Pokud už skauta nenavštěvuje nikdo z rodiny, přesuňte celou rodinu do archivu.', 'warning');
                         }
                     }
-                    $otevrena_id = $id;
                 }
             }
 
@@ -2507,7 +2509,7 @@ function sb_prehled_rodin() {
                     } else {
                         delete_post_meta($id, 'rodina_archiv');
                         $zprava .= sb_alert('Rodina byla obnovena z archivu.');
-                        $otevrena_id = $id;
+                        $ulozena_id = $id;
                     }
                 }
             }
@@ -2576,6 +2578,7 @@ function sb_prehled_rodin() {
         .sb-rod-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px; margin-top:12px; }
         .sb-rod-card { box-sizing:border-box; min-width:0; max-width:100%; background:#fff; border:1px solid #d5dde5; border-radius:6px; padding:12px 14px; overflow-wrap:anywhere; }
         .sb-rod-card.sb-rod-off { background:#f6f6f6; border-style:dashed; }
+        .sb-rod-card.sb-rod-ulozeno { border-color:#2e7d32; box-shadow:0 0 0 2px #c8e6c9; transition:box-shadow 1s, border-color 1s; }
         .sb-rod-head { font-size:15px; font-weight:700; color:#0073aa; margin-bottom:6px; }
         .sb-rod-line { font-size:13px; color:#444; margin-bottom:6px; }
         .sb-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
@@ -2613,7 +2616,7 @@ function sb_prehled_rodin() {
     echo "</div>";
     echo "</div>";
 
-    $vykresli_kartu = function($r, $archivni) use ($oddily, $max_deti, $smi_upravovat, $je_spravce, $vsichni_rodice, $obsazeni, $otevrena_id, $plne_jmeno) {
+    $vykresli_kartu = function($r, $archivni) use ($oddily, $max_deti, $smi_upravovat, $je_spravce, $vsichni_rodice, $obsazeni, $otevrena_id, $ulozena_id, $plne_jmeno) {
         $deti = get_post_meta($r->ID, 'deti_rodiny', true);
         if (!is_array($deti)) $deti = [];
         $deti = array_values($deti);
@@ -2638,7 +2641,7 @@ function sb_prehled_rodin() {
             if (is_array($d) && isset($d['jmeno'])) $hledat[] = mb_strtolower($d['jmeno']);
         }
 
-        echo "<div class='sb-rod-card" . ($archivni ? " sb-rod-off" : "") . "' data-hledat='" . esc_attr(implode(' ', $hledat)) . "'>";
+        echo "<div id='sb-rodina-" . intval($r->ID) . "' class='sb-rod-card" . ($archivni ? " sb-rod-off" : "") . ($ulozena_id === $r->ID ? " sb-rod-ulozeno" : "") . "' data-hledat='" . esc_attr(implode(' ', $hledat)) . "'>";
         echo "<div class='sb-rod-head'>" . esc_html($r->post_title) . "</div>";
         echo "<div class='sb-rod-line'>👤 " . (!empty($rodice_html) ? implode(', ', $rodice_html) : "<em>bez přiřazených rodičů</em>") . "</div>";
 
@@ -2776,6 +2779,16 @@ function sb_prehled_rodin() {
             $vykresli_kartu($r, true);
         }
         echo "</div></details>";
+    }
+
+    if ($ulozena_id) {
+        // Po uložení přejít na uloženou (sbalenou) kartu a zvýraznění po chvíli zrušit
+        echo "<script>setTimeout(function() {
+    var k = document.getElementById('sb-rodina-" . intval($ulozena_id) . "');
+    if (!k) return;
+    k.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(function() { k.classList.remove('sb-rod-ulozeno'); }, 4000);
+}, 400);</script>";
     }
 
     echo "<script>
