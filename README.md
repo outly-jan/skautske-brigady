@@ -44,6 +44,8 @@ Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke
 
 Mimo revizi mohou rodiny upravovat jen správce. Trvalé smazání dítěte nebo rodiny je vyhrazeno správcům.
 
+Přejmenování rodiny automaticky převede i záznamy „walk-in" účastníků (párují se podle názvu rodiny), takže se rodině hodiny neztratí. Název nelze změnit na název jiné rodiny.
+
 Datový model: archivované děti jsou v post meta `deti_archiv` (`jmeno`, `oddil`, `od_roku`, `poznamka`, `datum`), archivovaná rodina má `rodina_archiv` (`od_roku`, `poznamka`, `datum`), stav revize je v option `sb_revize`. Pole `deti_rodiny` obsahuje vždy jen aktivní děti.
 
 ## Požadavky
