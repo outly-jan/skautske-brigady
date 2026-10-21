@@ -8,6 +8,16 @@ Author: Honza & Copilot
 
 if (!defined('ABSPATH')) exit;
 
+// Po deployi: každý PHP-FPM proces invaliduje svůj OPcache záznam
+$_sb_flag = __DIR__ . '/.sb_deploy_flag';
+if (file_exists($_sb_flag)) {
+    @unlink($_sb_flag);
+    if (function_exists('opcache_invalidate')) {
+        opcache_invalidate(__FILE__, true);
+    }
+}
+unset($_sb_flag);
+
 // CSV Export: roční výpis
 function sb_export_rocni_vypis_csv() {
     if (!isset($_GET['sb_export']) || $_GET['sb_export'] !== 'rocni_vypis') return;
@@ -37,8 +47,10 @@ function sb_export_rocni_vypis_csv() {
     fputcsv($output, ['Rodina', 'Děti', 'Počet dětí', 'Odpracováno (h)', 'Požadavek (h)', 'Rozdíl (h)', 'Poplatek (Kč)'], ';');
 
     foreach ($rodiny as $r) {
+        if (!sb_rodina_v_roce($r, $rok)) continue;
+
         $deti_meta  = get_post_meta($r->ID, 'deti_rodiny', true);
-        $pocet_deti = is_array($deti_meta) ? count($deti_meta) : 0;
+        $pocet_deti = sb_pocet_deti_pro_rok($r->ID, $rok);
 
         $pozadavek = 0;
         if ($poz_rok) {
@@ -54,6 +66,16 @@ function sb_export_rocni_vypis_csv() {
                 $celkem = sb_celkem_hodin($b->ID, $r->ID);
                 if ($celkem !== null) {
                     $odpracovano += $celkem;
+                } else {
+                    $walkins = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                    if (is_array($walkins)) {
+                        foreach ($walkins as $w) {
+                            if (($w['jmeno'] ?? '') === $r->post_title) {
+                                $odpracovano += max(1, intval($w['pocet'] ?? 1)) * intval($w['hodiny'] ?? 0);
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -64,6 +86,11 @@ function sb_export_rocni_vypis_csv() {
         $jmena = [];
         if (is_array($deti_meta)) {
             foreach ($deti_meta as $dite) {
+                $jmena[] = ($dite['jmeno'] ?? '') . ' – ' . ($dite['oddil'] ?? '');
+            }
+        }
+        foreach (sb_deti_archiv($r->ID) as $dite) {
+            if (is_array($dite) && isset($dite['od_roku']) && intval($dite['od_roku']) > intval($rok)) {
                 $jmena[] = ($dite['jmeno'] ?? '') . ' – ' . ($dite['oddil'] ?? '');
             }
         }
@@ -152,6 +179,126 @@ function sb_export_brigada_csv() {
 }
 add_action('init', 'sb_export_brigada_csv');
 
+function sb_export_prezencni_listina() {
+    if (!isset($_GET['sb_export']) || $_GET['sb_export'] !== 'prezencni_listina') return;
+    if (!isset($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'sb_prezencni_listina')) {
+        wp_die('Neplatný bezpečnostní token.');
+    }
+    $roles = wp_get_current_user()->roles;
+    if (!array_intersect($roles, ['administrator', 'spravce_brigad', 'author'])) {
+        wp_die('Nemáš oprávnění.');
+    }
+    $brigada_id = isset($_GET['brigada_id']) ? intval($_GET['brigada_id']) : 0;
+    if (!$brigada_id) wp_die('Neplatné ID brigády.');
+    $brigada_post = get_post($brigada_id);
+    if (!$brigada_post || $brigada_post->post_type !== 'brigada') wp_die('Brigáda nenalezena.');
+
+    $nazev     = $brigada_post->post_title;
+    $datum_raw = get_post_meta($brigada_id, 'datum_brigady', true);
+    $datum_fmt = $datum_raw ? date_i18n('j. n. Y', strtotime($datum_raw)) : '';
+    $misto     = get_post_meta($brigada_id, 'misto_konani', true);
+    $cas       = get_post_meta($brigada_id, 'cas_brigady', true);
+
+    $rodiny  = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+    $walkins = get_post_meta($brigada_id, 'walkin_ucastnici', true);
+    if (!is_array($walkins)) $walkins = [];
+    $walkin_jmena = array_column($walkins, 'jmeno');
+
+    $radky = [];
+    $jmena_prihlasenych = [];
+    foreach ($rodiny as $r) {
+        $pocet = intval(get_post_meta($brigada_id, 'ucastnici_' . $r->ID, true));
+        if (!$pocet) continue;
+        $radky[] = ['jmeno' => $r->post_title, 'osob' => $pocet];
+        $jmena_prihlasenych[] = $r->post_title;
+    }
+    foreach ($walkins as $w) {
+        if (in_array($w['jmeno'], $jmena_prihlasenych, true)) continue;
+        $radky[] = ['jmeno' => $w['jmeno'], 'osob' => max(1, intval($w['pocet'] ?? 1))];
+    }
+    usort($radky, fn($a, $b) => strcmp(mb_strtolower($a['jmeno']), mb_strtolower($b['jmeno'])));
+
+    header('Content-Type: text/html; charset=utf-8');
+    ?><!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Prezenční listina – <?php echo esc_html($nazev); ?></title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; font-size: 13px; color: #000; padding: 20px 30px; max-width: 900px; }
+h1 { font-size: 20px; margin-bottom: 6px; }
+.meta { font-size: 13px; color: #444; margin-bottom: 20px; line-height: 1.8; }
+table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+th, td { border: 1px solid #555; padding: 7px 10px; vertical-align: middle; }
+th { background: #e8e8e8; font-weight: bold; text-align: center; font-size: 12px; }
+td.rodina { font-weight: 600; }
+td.ucastnik { text-align: center; color: #555; font-size: 12px; width: 70px; }
+td.cas { width: 120px; height: 30px; }
+td.podpis { width: 200px; }
+.btn-row { margin-bottom: 18px; }
+.btn-print { background: #1565c0; color: #fff; border: none; padding: 9px 22px; font-size: 14px; border-radius: 4px; cursor: pointer; }
+@media print {
+    .btn-row { display: none; }
+    body { padding: 8px 12px; }
+    th { background: #e0e0e0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+</style>
+</head>
+<body>
+<div class="btn-row">
+    <button class="btn-print" onclick="window.print()">🖨️ Tisk / Uložit jako PDF</button>
+</div>
+<h1><?php echo esc_html($nazev); ?></h1>
+<div class="meta">
+    <?php if ($datum_fmt): ?>📅 <?php echo esc_html($datum_fmt); ?><br><?php endif; ?>
+    <?php if ($misto): ?>📍 <?php echo esc_html($misto); ?><br><?php endif; ?>
+    <?php if ($cas): ?>⏰ <?php echo esc_html($cas); ?><?php endif; ?>
+</div>
+<table>
+    <thead>
+    <tr>
+        <th style="width:200px; text-align:left;">Rodina</th>
+        <th style="width:70px;">Účastník</th>
+        <th style="width:120px;">Čas příchodu</th>
+        <th style="width:120px;">Čas odchodu</th>
+        <th style="width:200px;">Podpis</th>
+    </tr>
+    </thead>
+    <tbody>
+    <?php foreach ($radky as $rl): ?>
+        <?php for ($i = 1; $i <= $rl['osob']; $i++): ?>
+        <tr>
+            <?php if ($i === 1): ?>
+            <td class="rodina" rowspan="<?php echo intval($rl['osob']); ?>"><?php echo esc_html($rl['jmeno']); ?></td>
+            <?php endif; ?>
+            <td class="ucastnik">č.&nbsp;<?php echo $i; ?></td>
+            <td class="cas"></td>
+            <td class="cas"></td>
+            <?php if ($i === 1): ?>
+            <td class="podpis" rowspan="<?php echo intval($rl['osob']); ?>"></td>
+            <?php endif; ?>
+        </tr>
+        <?php endfor; ?>
+    <?php endforeach; ?>
+    <?php for ($w = 0; $w < 10; $w++): ?>
+    <tr>
+        <td class="cas"></td>
+        <td class="cas"></td>
+        <td class="cas"></td>
+        <td class="cas"></td>
+        <td class="podpis"></td>
+    </tr>
+    <?php endfor; ?>
+    </tbody>
+</table>
+</body>
+</html>
+    <?php
+    exit;
+}
+add_action('init', 'sb_export_prezencni_listina');
+
 // Vrátí celkový počet odpracovaných hodin rodiny na brigádě.
 // Podporuje starý formát (h/os. × počet) i nový (individuální hodiny na osobu).
 function sb_celkem_hodin($brigada_id, $rodina_id) {
@@ -165,8 +312,141 @@ function sb_celkem_hodin($brigada_id, $rodina_id) {
     return intval($h) * $n;
 }
 
+// Archivované děti rodiny (děti, které už skauta nenavštěvují) – vždy pole.
+function sb_deti_archiv($rodina_id) {
+    $archiv = get_post_meta($rodina_id, 'deti_archiv', true);
+    return is_array($archiv) ? $archiv : [];
+}
 
-// SHORTCODE: hlavní rozhraní správce
+// Údaje o archivaci rodiny (['od_roku', 'poznamka', 'datum']) nebo null, pokud rodina archivovaná není.
+function sb_rodina_archiv($rodina_id) {
+    $a = get_post_meta($rodina_id, 'rodina_archiv', true);
+    return (is_array($a) && !empty($a['od_roku'])) ? $a : null;
+}
+
+// Počet dětí rodiny pro daný rok ze současného stavu (bez snímku):
+// aktivní děti + děti, které odešly až od pozdějšího roku, než je $rok.
+function sb_pocet_deti_ze_stavu($rodina_id, $rok) {
+    $deti  = get_post_meta($rodina_id, 'deti_rodiny', true);
+    $pocet = is_array($deti) ? count($deti) : 0;
+    foreach (sb_deti_archiv($rodina_id) as $d) {
+        if (is_array($d) && isset($d['od_roku']) && intval($d['od_roku']) > intval($rok)) {
+            $pocet++;
+        }
+    }
+    return $pocet;
+}
+
+// Vrátí počet dětí rodiny pro daný rok — ze snímku, nebo ze současného stavu jako záložní hodnotu.
+function sb_pocet_deti_pro_rok($rodina_id, $rok) {
+    $snapshot = get_post_meta($rodina_id, 'pocet_deti_' . intval($rok), true);
+    if ($snapshot !== '' && $snapshot !== false && $snapshot !== null) {
+        return intval($snapshot);
+    }
+    return sb_pocet_deti_ze_stavu($rodina_id, $rok);
+}
+
+// Vrátí true, pokud rodina vznikla před koncem skautského roku X (tj. do 31. 8. roku X)
+// a zároveň není od roku X (nebo dříve) v archivu.
+function sb_rodina_v_roce($rodina, $rok) {
+    $archiv = sb_rodina_archiv($rodina->ID);
+    if ($archiv && intval($archiv['od_roku']) <= intval($rok)) {
+        return false;
+    }
+    $konec_roku = new DateTime(intval($rok) . '-08-31 23:59:59');
+    $vznik      = new DateTime($rodina->post_date);
+    return $vznik <= $konec_roku;
+}
+
+// Vysvětlující věta pro rodinu, na kterou se požadavky v daném roce nevztahují (HTML).
+function sb_poznamka_mimo_rok($rodina, $rok) {
+    $rok    = intval($rok);
+    $archiv = sb_rodina_archiv($rodina->ID);
+    if ($archiv && intval($archiv['od_roku']) <= $rok) {
+        return 'Rodina je od roku ' . intval($archiv['od_roku']) . ' vedena v archivu (děti už skauta nenavštěvují). Požadavky se pro ni od tohoto roku nepočítají.';
+    }
+    return 'Rodina vznikla po 31. 8. ' . $rok . ' — patří do sezóny ' . $rok . '/' . ($rok + 1) . '. Požadavky platí od roku ' . ($rok + 1) . '.';
+}
+
+// Stav revize rodin: ['otevrena' => bool, 'rok' => cílový rok revize].
+function sb_revize_stav() {
+    $r = get_option('sb_revize', []);
+    if (!is_array($r)) $r = [];
+    return [
+        'otevrena' => !empty($r['otevrena']),
+        'rok'      => isset($r['rok']) ? intval($r['rok']) : 0,
+    ];
+}
+
+// Rok, od kterého se archivované dítě/rodina přestane počítat do požadavků.
+function sb_rok_archivace() {
+    $revize = sb_revize_stav();
+    if ($revize['otevrena'] && $revize['rok'] > 0) {
+        return $revize['rok'];
+    }
+    return intval(wp_date('Y')) + 1;
+}
+
+// Oprávnění: správce/administrátor (plný přístup).
+function sb_je_spravce() {
+    $u = wp_get_current_user();
+    return (bool) array_intersect((array) $u->roles, ['administrator', 'spravce_brigad']);
+}
+
+// Oprávnění: smí vidět přehled rodin (správce i vedoucí = role author).
+function sb_muze_videt_rodiny() {
+    $u = wp_get_current_user();
+    return (bool) array_intersect((array) $u->roles, ['administrator', 'spravce_brigad', 'author']);
+}
+
+// Oprávnění: smí rodiny upravovat (správce kdykoli, vedoucí jen při otevřené revizi).
+function sb_muze_upravovat_rodiny() {
+    if (sb_je_spravce()) return true;
+    if (!sb_muze_videt_rodiny()) return false;
+    $revize = sb_revize_stav();
+    return $revize['otevrena'];
+}
+
+// Vrátí post rodiny podle ID, nebo null, pokud ID nepatří rodině.
+function sb_get_rodina($id) {
+    $p = get_post(intval($id));
+    return ($p && $p->post_type === 'rodina') ? $p : null;
+}
+
+// Walk-in záznamy se s rodinou párují podle názvu rodiny. Při přejmenování rodiny proto
+// přepíšeme jméno ve všech walk-in záznamech všech brigád, aby se hodiny rodině neztratily.
+// Vrací počet upravených brigád.
+function sb_prejmenovat_walkin($stary, $novy) {
+    if ($stary === '' || $novy === '' || $stary === $novy) return 0;
+    $upraveno = 0;
+    $brigady  = get_posts(['post_type' => 'brigada', 'numberposts' => -1, 'post_status' => 'any']);
+    foreach ($brigady as $b) {
+        $walkins = get_post_meta($b->ID, 'walkin_ucastnici', true);
+        if (!is_array($walkins)) continue;
+        $zmena = false;
+        foreach ($walkins as $i => $w) {
+            if (is_array($w) && isset($w['jmeno']) && $w['jmeno'] === $stary) {
+                $walkins[$i]['jmeno'] = $novy;
+                $zmena = true;
+            }
+        }
+        if ($zmena) {
+            update_post_meta($b->ID, 'walkin_ucastnici', wp_slash($walkins));
+            wp_cache_delete($b->ID, 'post_meta');
+            $upraveno++;
+        }
+    }
+    return $upraveno;
+}
+
+// Hook: kdykoli se změní název rodiny (Správa rodin i editace ve wp-adminu), převedeme walk-in záznamy.
+function sb_rodina_prejmenovana($post_id, $po, $pred) {
+    if (!$po || !$pred || $po->post_type !== 'rodina') return;
+    if ($pred->post_title !== $po->post_title) {
+        sb_prejmenovat_walkin($pred->post_title, $po->post_title);
+    }
+}
+add_action('post_updated', 'sb_rodina_prejmenovana', 10, 3);
  function sb_spravce_brigad_shortcode() {
   $current_user = wp_get_current_user();
 $roles = $current_user->roles;
@@ -197,7 +477,7 @@ if (array_intersect($roles, $allowed_limited)) {
             $aktivni_sekce = 'ucastnici_dle';
         }
         // Správa účastníků
-        if (isset($_POST['zobraz_ucastniky']) || isset($_POST['edit_ucastnik']) || isset($_POST['delete_ucastnik'])) {
+        if (isset($_POST['zobraz_ucastniky']) || isset($_POST['edit_ucastnik']) || isset($_POST['delete_ucastnik']) || isset($_POST['odhlasit_ucastnika'])) {
             $aktivni_sekce = 'upravit_ucastniky';
         }
         // Vytvořit rodinu
@@ -210,8 +490,12 @@ if (array_intersect($roles, $allowed_limited)) {
             $aktivni_sekce = 'prehled';
         }
         // Nastavit požadavky
-        if (isset($_POST['upravit_pozadavky_dle_roku']) || isset($_POST['ulozit_pozadavky'])) {
+        if (isset($_POST['upravit_pozadavky_dle_roku']) || isset($_POST['ulozit_pozadavky']) || isset($_POST['sb_revize_akce'])) {
             $aktivni_sekce = 'upravit_pozadavky';
+        }
+        // Rodiny dle brigád
+        if (isset($_POST['zobraz_rodinu_admin'])) {
+            $aktivni_sekce = 'rodiny_dle_brigad';
         }
         // Roční výpis
         if (isset($_POST['zobraz_rocni_vypis'])) {
@@ -370,6 +654,18 @@ if (array_intersect($roles, $allowed_limited)) {
             if (hash.startsWith('#sb-')) {
                 sbShowSection(hash.replace('#sb-', ''));
             }
+
+            // Obnov scroll pozici po POST (uložení formuláře)
+            const savedY = sessionStorage.getItem('sb_scroll_y');
+            if (savedY !== null) {
+                sessionStorage.removeItem('sb_scroll_y');
+                setTimeout(() => window.scrollTo({ top: parseInt(savedY), behavior: 'instant' }), 150);
+            }
+        });
+
+        // Uložení scroll pozice před odesláním formuláře
+        document.addEventListener('submit', function() {
+            sessionStorage.setItem('sb_scroll_y', window.scrollY);
         });
     </script>
     
@@ -383,9 +679,13 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('upravit_brigady')">🛠️ Vytvoření a správa brigád</button>
             <button onclick="sbShowSection('upravit_ucastniky')">🧮 Správa účastníků</button>
             <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
+            <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
             <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
+    <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
+    <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
+    <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
     <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
 <?php endif; ?>
     </div>
@@ -442,8 +742,21 @@ if (array_intersect($roles, $allowed_limited)) {
                 <br><br>
                 <h5>👥 <b>Správa rodin</b></h5>
                 <ul>
-                    <li>Rodiny jsou řazeny abecedně</li>
-                    <li>U každé lze upravit údaje nebo ji smazat</li>
+                    <li>Přehled karet: rodina, rodiče, děti a jejich oddíl (děti, které už nechodí, jsou šedě přeškrtnuté)</li>
+                    <li>Vyhledávání rodiny, rodiče nebo dítěte v poli nahoře</li>
+                    <li>Tlačítkem <strong>Upravit</strong> se karta rozbalí: změna názvu, rodičů, jmen a oddílů dětí, přidání dítěte</li>
+                    <li><strong>Už nechodí</strong> – dítě se přesune do archivu (data se nemažou) a od příštího roku se nepočítá do požadavků; poznámka je volitelná</li>
+                    <li><strong>Přesunout rodinu do archivu</strong> – celá rodina už skauta nenavštěvuje; v sekci Archiv rodin ji lze kdykoli obnovit</li>
+                    <li>Vedoucí (role author) mohou rodiny upravovat jen při <strong>otevřené revizi</strong>, jinak je vidí jen pro čtení</li>
+                    <li>Trvalé smazání dítěte nebo rodiny může provést jen správce</li>
+                </ul>
+
+                <br><br>
+                <h5>🗂️ <b>Revize rodin</b></h5>
+                <ul>
+                    <li>V sekci <em>Nastavit požadavky dle roku</em> správce <strong>zahájí revizi</strong> (zmrazí se počty dětí pro letošní rok a vedoucí mohou upravovat rodiny)</li>
+                    <li>Po dokončení úprav revizi <strong>ukončí</strong> – vytvoří se snímek počtu dětí pro příští rok</li>
+                    <li>Doporučený termín: zahájit v říjnu, ukončit nejpozději do konce listopadu (v prosinci rodiče vidí požadavky na příští rok)</li>
                 </ul>
 
                 <br><br>
@@ -481,9 +794,13 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-upravit_brigady" class="<?php echo ($aktivni_sekce === 'upravit_brigady') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_brigad(); ?></div>
             <div id="sb-upravit_ucastniky" class="<?php echo ($aktivni_sekce === 'upravit_ucastniky') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_ucastniku(); ?></div>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
+            <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
+            <div id="sb-rodiny" class="<?php echo ($aktivni_sekce === 'rodiny') ? 'sb-active' : ''; ?>"><?php echo sb_vytvorit_rodinu(); ?></div>
+            <div id="sb-prehled" class="<?php echo ($aktivni_sekce === 'prehled') ? 'sb-active' : ''; ?>"><?php echo sb_prehled_rodin(); ?></div>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
+            <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
         <?php endif; ?>
     </div>
@@ -498,7 +815,7 @@ add_shortcode('spravce_brigad', 'sb_spravce_brigad_shortcode');
 function sb_alert($text, $type = 'success') {
     $types = ['success' => 'sb-alert-success', 'error' => 'sb-alert-error', 'info' => 'sb-alert-info', 'warning' => 'sb-alert-warning'];
     $class = $types[$type] ?? 'sb-alert-info';
-    return "<div class='sb-alert {$class}'>{$text}</div>";
+    return "<div class='sb-alert {$class}'>" . esc_html($text) . "</div>";
 }
 
 // Utility: přesná kontrola, zda existuje post s daným názvem
@@ -538,6 +855,7 @@ function sb_ucastnici_dle_brigad() {
 
     echo "<div class='sb-card'>";
     echo "<form method='post' class='sb-form-row'>";
+    wp_nonce_field('zobraz_ucast', '_wpnonce_zobraz_ucast');
     echo "<div class='sb-form-group sb-fg-inline'><label>Brigáda:</label><select name='vybrana_brigada'>";
     foreach ($brigady as $b) {
         $selected = (isset($_POST['vybrana_brigada']) && intval($_POST['vybrana_brigada']) === $b->ID) ? 'selected' : '';
@@ -550,6 +868,10 @@ function sb_ucastnici_dle_brigad() {
 
     // Výpis účastníků
 if (isset($_POST['zobraz_ucast'])) {
+    if (!isset($_POST['_wpnonce_zobraz_ucast']) || !wp_verify_nonce($_POST['_wpnonce_zobraz_ucast'], 'zobraz_ucast')) {
+        echo sb_alert('Neplatný bezpečnostní token. Zkuste to prosím znovu.', 'error');
+        return ob_get_clean();
+    }
     $id = intval($_POST['vybrana_brigada']);
 
     // --- Získání informací o brigádě ---
@@ -624,9 +946,17 @@ if (isset($_POST['zobraz_ucast'])) {
             'brigada_id' => $id,
             '_wpnonce'   => wp_create_nonce('sb_export_brigada'),
         ]);
+        $pl_url = add_query_arg([
+            'sb_export'  => 'prezencni_listina',
+            'brigada_id' => $id,
+            '_wpnonce'   => wp_create_nonce('sb_prezencni_listina'),
+        ]);
         echo "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:20px; margin-bottom:8px;'>";
         echo "<h5 class='sb-card-title' style='margin:0;'>👥 Přehled účastníků</h5>";
+        echo "<div style='display:flex; gap:8px;'>";
+        echo "<a href='" . esc_url($pl_url) . "' target='_blank' class='sb-btn sb-btn-secondary sb-btn-sm'>📋 Prezenční listina</a>";
         echo "<a href='" . esc_url($export_url) . "' class='sb-btn sb-btn-secondary sb-btn-sm'>📥 Stáhnout Excel (CSV)</a>";
+        echo "</div>";
         echo "</div>";
         echo "<table class='sb-table'>";
         echo "<tr><th>Rodina / jméno</th><th class='center'>Osob</th><th class='center'>Hod./os.</th><th class='center'>Celkem odpracováno</th><th>Způsob přihlášení</th></tr>";
@@ -707,6 +1037,27 @@ if (!array_intersect($roles, ['administrator', 'spravce_brigad'])) {
 
     $zprava = '';
     $vybrana_id = isset($_POST['vybrana_brigada']) ? intval($_POST['vybrana_brigada']) : 0;
+    $duplikat_data = null;
+
+    // Duplikace brigády – předvyplní formulář nové brigády
+    if (isset($_POST['duplikovat_brigadu'])) {
+        if (!isset($_POST['_wpnonce_duplikovat']) || !wp_verify_nonce($_POST['_wpnonce_duplikovat'], 'duplikovat_brigadu')) {
+            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+        } else {
+            $zdroj_id = intval($_POST['zdroj_brigada_id']);
+            $duplikat_data = [
+                'nazev'    => get_the_title($zdroj_id),
+                'datum'    => '',
+                'cas'      => get_post_meta($zdroj_id, 'cas_brigady', true),
+                'misto'    => get_post_meta($zdroj_id, 'misto_konani', true),
+                'delka'    => get_post_meta($zdroj_id, 'delka_brigady', true),
+                'pocet'    => get_post_meta($zdroj_id, 'pozadovany_pocet', true),
+                'vhodne'   => get_post_meta($zdroj_id, 'vhodne_pro', true),
+                'poznamka' => get_post_meta($zdroj_id, 'poznamka_brigady', true),
+            ];
+            $vybrana_id = $zdroj_id;
+        }
+    }
 
    // Uložení úprav
 if (isset($_POST['ulozit_brigadu'])) {
@@ -877,32 +1228,48 @@ if (isset($_POST['nova_brigada'])) {
         echo "<input type='submit' name='ulozit_brigadu' value='💾 Uložit změny' class='sb-btn sb-btn-primary'>";
         echo "</div></form>";
 
-        echo "<form method='post' onsubmit='return confirm(\"Opravdu chceš smazat brigádu?\")' style='margin-top:14px;'>";
+        echo "<div class='sb-btn-row' style='margin-top:14px; gap:8px;'>";
+        echo "<form method='post' style='display:inline;'>";
+        wp_nonce_field('duplikovat_brigadu', '_wpnonce_duplikovat');
+        echo "<input type='hidden' name='zdroj_brigada_id' value='{$b->ID}'>";
+        echo "<input type='hidden' name='vybrana_brigada' value='{$b->ID}'>";
+        echo "<input type='submit' name='duplikovat_brigadu' value='📋 Duplikovat brigádu' class='sb-btn sb-btn-secondary'>";
+        echo "</form>";
+        echo "<form method='post' onsubmit='return confirm(\"Opravdu chceš smazat brigádu?\")' style='display:inline;'>";
         wp_nonce_field('smazat_brigadu', '_wpnonce_smazat_brigadu');
         echo "<input type='hidden' name='smazat_brigadu' value='{$b->ID}'>";
         echo "<input type='submit' value='🗑️ Smazat brigádu' class='sb-btn sb-btn-danger'>";
         echo "</form>";
         echo "</div>";
+        echo "</div>";
     }
 
-    // Formulář pro vytvoření nové brigády (skrytý)
-    echo "<button onclick=\"document.getElementById('nova-brigada-form').style.display='block'; this.style.display='none';\" class='sb-btn sb-btn-success' style='margin-top:14px;'>➕ Vytvořit novou brigádu</button>";
-    echo "<div id='nova-brigada-form' style='display:none; margin-top:16px;'>";
+    // Formulář pro vytvoření nové brigády (skrytý, nebo předvyplněný při duplikaci)
+    $nova_form_display = $duplikat_data !== null ? 'block' : 'none';
+    $nova_btn_display  = $duplikat_data !== null ? 'none' : 'inline-block';
+    $d = $duplikat_data ?? ['nazev' => '', 'datum' => '', 'cas' => '', 'misto' => '', 'delka' => '', 'pocet' => '', 'vhodne' => '', 'poznamka' => ''];
+    $nova_titulek = $duplikat_data !== null ? '📋 Duplikát brigády – upravte údaje a uložte' : '➕ Nová brigáda';
+
+    echo "<button id='btn-nova-brigada' onclick=\"document.getElementById('nova-brigada-form').style.display='block'; this.style.display='none';\" class='sb-btn sb-btn-success' style='margin-top:14px; display:{$nova_btn_display};'>➕ Vytvořit novou brigádu</button>";
+    echo "<div id='nova-brigada-form' style='display:{$nova_form_display}; margin-top:16px;'>";
+    if ($duplikat_data !== null) {
+        echo "<script>document.addEventListener('DOMContentLoaded', function() { document.getElementById('nova-brigada-form').scrollIntoView({behavior:'smooth'}); });</script>";
+    }
     echo "<div class='sb-card'>";
-    echo "<h4 class='sb-card-title'>➕ Nová brigáda</h4>";
+    echo "<h4 class='sb-card-title'>" . esc_html($nova_titulek) . "</h4>";
     echo "<form method='post'>";
     wp_nonce_field('nova_brigada', '_wpnonce_nova_brigada');
 
-    echo "<div class='sb-form-group'><label>Název brigády:</label><input type='text' name='novy_nazev_brigady' required></div>";
+    echo "<div class='sb-form-group'><label>Název brigády:</label><input type='text' name='novy_nazev_brigady' value='" . esc_attr($d['nazev']) . "' required></div>";
     echo "<div class='sb-form-group'><label>Datum brigády:</label>";
-    echo "<span class='sb-form-inline'><input type='date' name='novy_datum_brigady' required style='width:160px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_datum_predbezne'> předběžně</label></span></div>";
+    echo "<span class='sb-form-inline'><input type='date' name='novy_datum_brigady' value='" . esc_attr($d['datum']) . "' required style='width:160px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_datum_predbezne'> předběžně</label></span></div>";
     echo "<div class='sb-form-group'><label>Čas konání:</label>";
-    echo "<span class='sb-form-inline'><input type='text' name='novy_cas_brigady' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_cas_predbezne'> předběžně</label></span></div>";
-    echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='novy_misto_konani'></div>";
-    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady'></div>";
-    echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='novy_pozadovany_pocet' min='1' style='width:90px;'></div>";
-    echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='novy_vhodne_pro'></div>";
-    echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='novy_poznamka_brigady' rows='3'></textarea></div>";
+    echo "<span class='sb-form-inline'><input type='text' name='novy_cas_brigady' value='" . esc_attr($d['cas']) . "' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_cas_predbezne'> předběžně</label></span></div>";
+    echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='novy_misto_konani' value='" . esc_attr($d['misto']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady' value='" . esc_attr($d['delka']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='novy_pozadovany_pocet' value='" . esc_attr($d['pocet']) . "' min='1' style='width:90px;'></div>";
+    echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='novy_vhodne_pro' value='" . esc_attr($d['vhodne']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='novy_poznamka_brigady' rows='3'>" . esc_textarea($d['poznamka']) . "</textarea></div>";
     echo "<div class='sb-btn-row'><input type='submit' name='nova_brigada' value='💾 Vytvořit brigádu' class='sb-btn sb-btn-primary'></div>";
     echo "</form>";
     echo "</div></div>";
@@ -959,6 +1326,23 @@ function sb_sprava_ucastniku() {
             wp_cache_delete($brigada_id, 'post_meta');
             $vybrana_brigada_id = $brigada_id;
             $zprava .= sb_alert('Záznam o odpracovaných hodinách byl odebrán.');
+            $zprava .= "<script>setTimeout(function() { sbShowSection('upravit_ucastniky'); }, 100);</script>";
+        }
+    }
+
+    // Odhlášení rodiny z brigády (smaže přihlášení i hodiny)
+    if (isset($_POST['odhlasit_ucastnika'])) {
+        if (!isset($_POST['_wpnonce_odhlasit_ucastnika']) || !wp_verify_nonce($_POST['_wpnonce_odhlasit_ucastnika'], 'odhlasit_ucastnika')) {
+            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+        } else {
+            $brigada_id = intval($_POST['brigada_id']);
+            $rodina_id  = intval($_POST['rodina_id']);
+            delete_post_meta($brigada_id, 'ucastnici_' . $rodina_id);
+            delete_post_meta($brigada_id, 'odpracovano_' . $rodina_id);
+            delete_post_meta($brigada_id, 'hodiny_osob_' . $rodina_id);
+            wp_cache_delete($brigada_id, 'post_meta');
+            $vybrana_brigada_id = $brigada_id;
+            $zprava .= sb_alert('Rodina byla odhlášena z brigády.');
             $zprava .= "<script>setTimeout(function() { sbShowSection('upravit_ucastniky'); }, 100);</script>";
         }
     }
@@ -1175,12 +1559,20 @@ function sb_sprava_ucastniku() {
                 }
                 echo "<input type='submit' name='edit_ucastnik' value='💾 Uložit' class='sb-btn sb-btn-primary sb-btn-sm'>";
                 echo "</form>";
-                if ($celkem_h !== '') {
+                if ($osirely) {
                     echo "<form method='post' style='display:contents;' onsubmit='return confirm(\"Odebrat záznam?\")'>";
                     wp_nonce_field('delete_ucastnik', '_wpnonce_delete_ucastnik');
                     echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
                     echo "<input type='hidden' name='rodina_id'  value='" . esc_attr($radek['rodina_id']) . "'>";
                     echo "<input type='submit' name='delete_ucastnik' value='🗑️ Odebrat záznam' class='sb-btn sb-btn-danger sb-btn-sm'>";
+                    echo "</form>";
+                }
+                if ($prihlaseno && !$osirely) {
+                    echo "<form method='post' style='display:contents;' onsubmit='return confirm(\"Odhlásit rodinu z brigády? Smažou se i případné hodiny.\")'>";
+                    wp_nonce_field('odhlasit_ucastnika', '_wpnonce_odhlasit_ucastnika');
+                    echo "<input type='hidden' name='brigada_id' value='" . esc_attr($id) . "'>";
+                    echo "<input type='hidden' name='rodina_id'  value='" . esc_attr($radek['rodina_id']) . "'>";
+                    echo "<input type='submit' name='odhlasit_ucastnika' value='🚫 Odhlásit z brigády' class='sb-btn sb-btn-danger sb-btn-sm'>";
                     echo "</form>";
                 }
                 echo "</div>";
@@ -1256,10 +1648,12 @@ function sb_sprava_ucastniku() {
 
 
 function sb_vytvorit_rodinu() {
-    $current_user = wp_get_current_user();
-    $roles = $current_user->roles;
-    if (!array_intersect($roles, ['administrator', 'spravce_brigad'])) {
+    if (!sb_muze_videt_rodiny()) {
         return '<p>Nemáš oprávnění pro vytváření rodin.</p>';
+    }
+    if (!sb_muze_upravovat_rodiny()) {
+        return "<h3 class='sb-section-title'>➕ Vytvořit rodinu</h3>" .
+               sb_alert('Zakládání rodin je teď uzavřené. Otevře se, když správce zahájí revizi rodin.', 'info');
     }
 
     $zprava = '';
@@ -1285,6 +1679,7 @@ function sb_vytvorit_rodinu() {
     // Zjištění, kteří rodiče už jsou přiřazeni
     $obsazeni_rodice = [];
     foreach ($rodiny as $r) {
+        if (sb_rodina_archiv($r->ID)) continue; // rodiče archivovaných rodin jsou volní
         $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
         if (is_array($prirazeni)) {
             foreach ($prirazeni as $rid) {
@@ -1301,7 +1696,8 @@ function sb_vytvorit_rodinu() {
             $zprava = sb_alert('Neplatný bezpečnostní token. Zkuste to prosím znovu.', 'error');
         } else {
             $nazev = sanitize_text_field($_POST['nazev_rodiny']);
-            $vybrani_rodice = isset($_POST['rodice']) ? array_map('intval', $_POST['rodice']) : [];
+            $vybrani_rodice = isset($_POST['rodice']) && is_array($_POST['rodice']) ? array_map('intval', $_POST['rodice']) : [];
+            $vybrani_rodice = array_values(array_intersect($vybrani_rodice, array_map(function($u) { return intval($u->ID); }, $vsichni_rodice)));
 
             $existujici_id = sb_post_exists_by_title('rodina', $nazev);
 
@@ -1319,7 +1715,7 @@ function sb_vytvorit_rodinu() {
                     ]);
                     if ($id) {
                         update_post_meta($id, 'rodice_rodiny', $vybrani_rodice);
-                        $zprava = sb_alert('Rodina byla vytvořena: <strong>' . esc_html($nazev) . '</strong>.');
+                        $zprava = sb_alert('Rodina byla vytvořena: ' . $nazev . '.');
                         foreach ($vybrani_rodice as $rid) {
                             $obsazeni_rodice[$rid] = $id;
                         }
@@ -1400,11 +1796,67 @@ function sb_upravit_pozadavky_dle_roku() {
         } // konec else nonce
     }
 
+    // Revize rodin – zahájení a ukončení (jen správce)
+    if (isset($_POST['sb_revize_akce']) && sb_je_spravce()) {
+        if (!isset($_POST['_wpnonce_revize']) || !wp_verify_nonce($_POST['_wpnonce_revize'], 'sb_revize')) {
+            $zprava = sb_alert('Neplatný bezpečnostní token. Zkuste to prosím znovu.', 'error');
+        } else {
+            $akce    = sanitize_key($_POST['sb_revize_akce']);
+            $stav    = sb_revize_stav();
+            $cil     = intval(wp_date('Y')) + 1;
+            $rodiny_rev = get_posts(['post_type' => 'rodina', 'numberposts' => -1]);
+
+            if ($akce === 'zahajit' && !$stav['otevrena']) {
+                // Zmrazení aktuálního roku: snímek se vytvoří jen tam, kde ještě není
+                $zmrazit = $cil - 1;
+                foreach ($rodiny_rev as $rr) {
+                    if (!sb_rodina_v_roce($rr, $zmrazit)) continue;
+                    $ex = get_post_meta($rr->ID, 'pocet_deti_' . $zmrazit, true);
+                    if ($ex === '' || $ex === false || $ex === null) {
+                        update_post_meta($rr->ID, 'pocet_deti_' . $zmrazit, sb_pocet_deti_ze_stavu($rr->ID, $zmrazit));
+                    }
+                }
+                update_option('sb_revize', ['otevrena' => true, 'rok' => $cil], false);
+                $zprava = sb_alert('Revize rodin byla zahájena. Vedoucí mohou upravovat rodiny. Rok ' . $zmrazit . ' je zmrazen, změny se projeví od roku ' . $cil . '.');
+            } elseif ($akce === 'ukoncit' && $stav['otevrena'] && $stav['rok'] > 0) {
+                foreach ($rodiny_rev as $rr) {
+                    if (!sb_rodina_v_roce($rr, $stav['rok'])) continue;
+                    update_post_meta($rr->ID, 'pocet_deti_' . $stav['rok'], sb_pocet_deti_ze_stavu($rr->ID, $stav['rok']));
+                }
+                update_option('sb_revize', ['otevrena' => false, 'rok' => $stav['rok']], false);
+                $zprava = sb_alert('Revize rodin byla ukončena. Snímek počtu dětí pro rok ' . intval($stav['rok']) . ' byl vytvořen.');
+            }
+        }
+    }
+
     $hodiny = isset($pozadavky[$vybrany_rok]) ? $pozadavky[$vybrany_rok] : ['1' => '', '2' => '', '3' => '', 'sazba' => ''];
 
     ob_start();
     echo "<h3 class='sb-section-title'>📅 Požadavky dle roku</h3>";
     echo $zprava;
+
+    // Karta revize rodin
+    $revize     = sb_revize_stav();
+    $cil_rok    = intval(wp_date('Y')) + 1;
+    echo "<div class='sb-card'>";
+    echo "<h4 class='sb-card-title'>🗂️ Revize rodin</h4>";
+    if ($revize['otevrena']) {
+        echo sb_alert('Revize je otevřená (změny se projeví od roku ' . intval($revize['rok']) . '). Vedoucí teď mohou upravovat rodiny a archivovat děti.', 'warning');
+        echo "<p class='sb-text-muted'>Po dokončení úprav revizi ukončete – vytvoří se snímek počtu dětí pro rok " . intval($revize['rok']) . " a vedoucí už rodiny upravovat nebudou. Ukončete ji nejpozději do konce listopadu, aby rodiče v prosinci viděli správné požadavky na příští rok.</p>";
+        echo "<form method='post' onsubmit='return confirm(\"Opravdu ukončit revizi? Vytvoří se snímek pro rok " . intval($revize['rok']) . " (přepíše i ručně upravené hodnoty snímku).\")'>";
+        wp_nonce_field('sb_revize', '_wpnonce_revize');
+        echo "<input type='hidden' name='sb_revize_akce' value='ukoncit'>";
+        echo "<input type='submit' value='✅ Ukončit revizi' class='sb-btn sb-btn-success'>";
+        echo "</form>";
+    } else {
+        echo "<p class='sb-text-muted'>Revize je uzavřená – vedoucí mohou rodiny jen prohlížet. Zahájením revize se zmrazí počty dětí pro rok " . intval($cil_rok - 1) . " a vedoucí budou moci upravovat rodiny (změny se projeví od roku " . intval($cil_rok) . ").</p>";
+        echo "<form method='post' onsubmit='return confirm(\"Zahájit revizi rodin? Zmrazí se počty dětí pro rok " . intval($cil_rok - 1) . ".\")'>";
+        wp_nonce_field('sb_revize', '_wpnonce_revize');
+        echo "<input type='hidden' name='sb_revize_akce' value='zahajit'>";
+        echo "<input type='submit' value='▶️ Zahájit revizi' class='sb-btn sb-btn-primary'>";
+        echo "</form>";
+    }
+    echo "</div>";
 
     // Výběr roku
     echo "<div class='sb-card'>";
@@ -1458,6 +1910,63 @@ if (!$ma_data) {
 echo "</table>";
 echo "</div>";
 
+// === SNÍMEK POČTU DĚTÍ ===
+$rodiny_all = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+
+// Uložení automatického snímku
+if (isset($_POST['vytvorit_snapshot']) && isset($_POST['_wpnonce_snapshot']) &&
+    wp_verify_nonce($_POST['_wpnonce_snapshot'], 'sb_snapshot_' . $vybrany_rok)) {
+    foreach ($rodiny_all as $rr) {
+        if (!sb_rodina_v_roce($rr, $vybrany_rok)) continue;
+        update_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, sb_pocet_deti_ze_stavu($rr->ID, $vybrany_rok));
+    }
+    echo "<div class='sb-alert sb-alert-success'>Snímek počtu dětí pro rok $vybrany_rok byl vytvořen.</div>";
+}
+
+// Uložení ručních úprav
+if (isset($_POST['ulozit_snapshot_rucne']) && isset($_POST['_wpnonce_snapshot']) &&
+    wp_verify_nonce($_POST['_wpnonce_snapshot'], 'sb_snapshot_' . $vybrany_rok)) {
+    foreach ($rodiny_all as $rr) {
+        $klic = 'snap_' . $rr->ID;
+        if (isset($_POST[$klic])) {
+            update_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, max(0, intval($_POST[$klic])));
+        }
+    }
+    echo "<div class='sb-alert sb-alert-success'>Snímek byl upraven.</div>";
+}
+
+$rodiny_v_roce = array_filter($rodiny_all, function($rr) use ($vybrany_rok) {
+    return sb_rodina_v_roce($rr, $vybrany_rok);
+});
+
+echo "<div class='sb-card'>";
+echo "<h4 class='sb-card-title'>👶 Snímek počtu dětí pro rok " . intval($vybrany_rok) . "</h4>";
+echo "<p class='sb-text-muted' style='margin-bottom:10px;'>Počet dětí použitý pro výpočet požadavků. Pokud snímek neexistuje, použije se aktuální stav rodiny.</p>";
+
+echo "<form method='post'>";
+wp_nonce_field('sb_snapshot_' . $vybrany_rok, '_wpnonce_snapshot');
+echo "<input type='hidden' name='vybrany_rok' value='" . intval($vybrany_rok) . "'>";
+echo "<div style='margin-bottom:10px;'><input type='submit' name='vytvorit_snapshot' value='📷 Vytvořit snímek ze současného stavu' class='sb-btn sb-btn-secondary'></div>";
+
+echo "<table class='sb-table' style='max-width:500px;'>";
+echo "<thead><tr><th>Rodina</th><th class='center'>Aktuálně dětí</th><th class='center'>Snímek pro " . intval($vybrany_rok) . "</th></tr></thead><tbody>";
+
+foreach ($rodiny_v_roce as $rr) {
+    $aktualne   = sb_pocet_deti_ze_stavu($rr->ID, $vybrany_rok);
+    $snap_raw   = get_post_meta($rr->ID, 'pocet_deti_' . $vybrany_rok, true);
+    $snap       = ($snap_raw !== '' && $snap_raw !== false && $snap_raw !== null) ? intval($snap_raw) : null;
+    $snap_zobr  = $snap !== null ? $snap : '<em class="sb-text-muted">– (použije se ' . $aktualne . ')</em>';
+    echo "<tr>
+        <td>" . esc_html($rr->post_title) . "</td>
+        <td class='center'>$aktualne</td>
+        <td class='center'><input type='number' name='snap_{$rr->ID}' value='" . ($snap !== null ? $snap : $aktualne) . "' min='0' style='width:60px;'></td>
+    </tr>";
+}
+echo "</tbody></table>";
+echo "<div style='margin-top:10px;'><input type='submit' name='ulozit_snapshot_rucne' value='💾 Uložit úpravy snímku' class='sb-btn sb-btn-primary'></div>";
+echo "</form>";
+echo "</div>";
+
     return ob_get_clean();
 }
 
@@ -1499,35 +2008,28 @@ function sb_rocni_vypis() {
         $pozadavky_rok = $pozadavky[$vybrany_rok] ?? null;
         $sazba = isset($pozadavky_rok['sazba']) ? floatval($pozadavky_rok['sazba']) : 0;
 
-        echo "<div class='sb-card'>";
-        echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
-
-        echo "<table class='sb-table'>";
-        echo "<tr>
-            <th>Rodina</th>
-            <th>Děti</th>
-            <th>Rodiče</th>
-            <th class='center'>Počet dětí</th>
-            <th class='center'>Odpracováno (h)</th>
-            <th class='center'>Požadavek (h)</th>
-            <th class='center'>Rozdíl (h)</th>
-            <th class='center'>Poplatek (Kč)</th>
-            <th>Brigády</th>
-        </tr>";
-
+        // --- Nejprve projdeme všechny rodiny a sestavíme data i celkový součet ---
+        $celkem_poplatek = 0;
+        $radky = [];
         foreach ($rodiny as $r) {
+            if (!sb_rodina_v_roce($r, $vybrany_rok)) continue;
+
             $rodina_id = $r->ID;
             $nazev = esc_html($r->post_title);
             $deti = get_post_meta($rodina_id, 'deti_rodiny', true);
             $rodice = get_post_meta($rodina_id, 'rodice_rodiny', true);
-            $pocet_deti = is_array($deti) ? count($deti) : 0;
+            $pocet_deti = sb_pocet_deti_pro_rok($rodina_id, $vybrany_rok);
 
             $jmena_deti = '';
             if (is_array($deti)) {
                 foreach ($deti as $dite) {
-                    $jmeno = esc_html($dite['jmeno']);
-                    $oddil = esc_html($dite['oddil']);
-                    $jmena_deti .= "$jmeno – $oddil<br>";
+                    $jmena_deti .= esc_html($dite['jmeno']) . " – " . esc_html($dite['oddil']) . "<br>";
+                }
+            }
+            // Děti, které odešly až od pozdějšího roku, se v tomto roce ještě počítají
+            foreach (sb_deti_archiv($rodina_id) as $dite) {
+                if (is_array($dite) && isset($dite['od_roku']) && intval($dite['od_roku']) > intval($vybrany_rok)) {
+                    $jmena_deti .= esc_html($dite['jmeno']) . " – " . esc_html($dite['oddil']) . "<br>";
                 }
             }
 
@@ -1535,24 +2037,17 @@ function sb_rocni_vypis() {
             if (is_array($rodice)) {
                 foreach ($rodice as $rid) {
                     $u = get_user_by('id', $rid);
-                    if ($u) {
-                        $jmena_rodicu .= sb_format_rodic_jmeno($u) . "<br>";
-                    }
+                    if ($u) $jmena_rodicu .= sb_format_rodic_jmeno($u) . "<br>";
                 }
             }
 
             $pozadavek = 0;
             if ($pozadavky_rok) {
-                if ($pocet_deti == 1) {
-                    $pozadavek = intval($pozadavky_rok['1']);
-                } elseif ($pocet_deti == 2) {
-                    $pozadavek = intval($pozadavky_rok['2']);
-                } elseif ($pocet_deti >= 3) {
-                    $pozadavek = intval($pozadavky_rok['3']);
-                }
+                if ($pocet_deti == 1) $pozadavek = intval($pozadavky_rok['1']);
+                elseif ($pocet_deti == 2) $pozadavek = intval($pozadavky_rok['2']);
+                elseif ($pocet_deti >= 3) $pozadavek = intval($pozadavky_rok['3']);
             }
 
-            // Odpracované hodiny — přihlášení i walk-in
             $odpracovano = 0;
             $brigady_seznam = [];
             foreach ($brigady as $b) {
@@ -1573,12 +2068,10 @@ function sb_rocni_vypis() {
                     if (is_array($walkins)) {
                         foreach ($walkins as $w) {
                             if (($w['jmeno'] ?? '') === $r->post_title) {
-                                $pocet_w = max(1, intval($w['pocet'] ?? 1));
-                                $hodiny_w = intval($w['hodiny'] ?? 0);
-                                $celkem = $pocet_w * $hodiny_w;
-                                $odpracovano += $celkem;
+                                $c = max(1, intval($w['pocet'] ?? 1)) * intval($w['hodiny'] ?? 0);
+                                $odpracovano += $c;
                                 $d = $datum_raw ? date('j. n.', strtotime($datum_raw)) : '';
-                                $brigady_seznam[] = esc_html($b->post_title) . ($d ? ' ' . $d : '') . ' (' . $celkem . ' h)';
+                                $brigady_seznam[] = esc_html($b->post_title) . ($d ? ' ' . $d : '') . ' (' . $c . ' h)';
                                 break;
                             }
                         }
@@ -1586,23 +2079,156 @@ function sb_rocni_vypis() {
                 }
             }
 
-            $rozdil = $odpracovano - $pozadavek;
+            $rozdil  = $odpracovano - $pozadavek;
             $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
-            $trida_rozdil = $rozdil >= 0 ? 'green' : 'red';
-            $brigady_str = implode('<br>', $brigady_seznam);
+            $celkem_poplatek += $poplatek;
+            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id');
+        }
+
+        // --- Agregované statistiky brigád ---
+        $minule_clovekoh   = 0;
+        foreach ($radky as $z) $minule_clovekoh += $z['odpracovano'];
+
+        $dnes_stat         = new DateTime('today', wp_timezone());
+        $minule_brigady_h  = 0;
+        $budouci_brigady_h = 0;
+        $budouci_clovekoh  = 0;
+        $rodina_budouci_h  = [];
+
+        foreach ($brigady as $b) {
+            $datum_raw = get_post_meta($b->ID, 'datum_brigady', true);
+            $rok_v_datu = null;
+            if ($datum_raw && preg_match('/\b(19|20)\d{2}\b/', $datum_raw, $m2)) {
+                $rok_v_datu = intval($m2[0]);
+            }
+            if ($rok_v_datu !== $vybrany_rok) continue;
+
+            $datum_obj_stat = DateTime::createFromFormat('Y-m-d', $datum_raw, wp_timezone());
+            preg_match('/\d+/', (string) get_post_meta($b->ID, 'delka_brigady', true), $dm);
+            $delka_h = isset($dm[0]) ? intval($dm[0]) : 0;
+
+            if ($datum_obj_stat && $datum_obj_stat < $dnes_stat) {
+                $minule_brigady_h += $delka_h;
+            } else {
+                $budouci_brigady_h += $delka_h;
+                $meta_b = get_post_meta($b->ID);
+                foreach ($meta_b as $mk => $mv) {
+                    if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                        $pocet_r = intval($mv[0]);
+                        $budouci_clovekoh += $pocet_r * $delka_h;
+                        $rid = intval(substr($mk, strlen('ucastnici_')));
+                        $rodina_budouci_h[$rid] = ($rodina_budouci_h[$rid] ?? 0) + $pocet_r * $delka_h;
+                    }
+                }
+            }
+        }
+
+        $predpokladane_inkaso = 0;
+        foreach ($radky as $z) {
+            $proj = $z['odpracovano'] + ($rodina_budouci_h[$z['rodina_id']] ?? 0);
+            $predpokladane_inkaso += max(0, $z['pozadavek'] - $proj) * $sazba;
+        }
+
+        // --- Výpis ---
+        echo "<div class='sb-card'>";
+        echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
+
+        $stat_style      = "flex:1; min-width:200px; padding:12px 16px; border-radius:4px; font-size:13px; line-height:1.7;";
+        $hodnota_brigad  = $budouci_clovekoh * $sazba;
+        $realne_snizeni  = $celkem_poplatek - $predpokladane_inkaso;
+
+        echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:12px;'>";
+
+        echo "<div style='$stat_style background:#fff3cd; border:1px solid #f0c040;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>💰 Aktuální inkaso</div>"
+            . "<div>Celkem k inkasu: <strong>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong></div>"
+            . "</div>";
+
+        echo "<div style='$stat_style background:#e8f5e9; border:1px solid #a5d6a7;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>✅ Uskutečněné brigády</div>"
+            . "<div>Hodin brigád: <strong>$minule_brigady_h h</strong></div>"
+            . "<div>Odpracováno: <strong>$minule_clovekoh člověkohodin</strong></div>"
+            . "</div>";
+
+        echo "<div style='$stat_style background:#e3f2fd; border:1px solid #90caf9;'>"
+            . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>📅 Zbývající brigády</div>"
+            . "<div>Hodin brigád: <strong>$budouci_brigady_h h</strong></div>"
+            . "<div>Předp. člověkohodiny: <strong>$budouci_clovekoh h</strong></div>"
+            . "<div>Hodnota brigád: <strong>" . number_format($hodnota_brigad, 2, ',', ' ') . " Kč</strong></div>"
+            . "<div>Reálné snížení inkasa: <strong>" . number_format($realne_snizeni, 2, ',', ' ') . " Kč</strong></div>"
+            . "</div>";
+
+        echo "</div>";
+
+        echo "<div style='margin-bottom:6px; font-size:13px;'>Předpokládané inkaso na konci roku: <strong style='font-size:15px;'>"
+            . number_format($predpokladane_inkaso, 2, ',', ' ') . " Kč</strong></div>";
+        echo "<div style='margin-bottom:20px; font-size:12px; color:#666; font-style:italic;'>Část rodin je na brigády přihlášena, přestože svůj požadavek hodin již splnila — jejich hodiny inkaso dále nesnižují.</div>";
+
+        echo "<table class='sb-table' id='sb-rocni-tabulka'>";
+        echo "<thead><tr>
+            <th class='center'>#</th>
+            <th>Rodina</th>
+            <th>Děti</th>
+            <th>Rodiče</th>
+            <th class='center'>Počet dětí</th>
+            <th data-col='5' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Odpracováno (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='6' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Požadavek (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='7' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Rozdíl (h) <span class='sb-si'> ↕</span></th>
+            <th data-col='8' data-type='num' class='center' style='cursor:pointer; user-select:none;'>Poplatek (Kč) <span class='sb-si'> ↕</span></th>
+            <th>Brigády</th>
+        </tr></thead><tbody>";
+
+        $radek_cislo = 1;
+        foreach ($radky as $z) {
+            $trida_rozdil = $z['rozdil'] >= 0 ? 'green' : 'red';
+            $brigady_str  = implode('<br>', $z['brigady_seznam']);
             echo "<tr>
-                <td>$nazev</td>
-                <td class='sb-small'>$jmena_deti</td>
-                <td class='sb-small'>$jmena_rodicu</td>
-                <td class='center'>$pocet_deti</td>
-                <td class='center'>$odpracovano</td>
-                <td class='center'>$pozadavek</td>
-                <td class='center $trida_rozdil'>" . intval($rozdil) . "</td>
-                <td class='center'>" . number_format($poplatek, 2, ',', ' ') . "</td>
+                <td class='center sb-rownum'>" . $radek_cislo++ . "</td>
+                <td>" . $z['nazev'] . "</td>
+                <td class='sb-small'>" . $z['jmena_deti'] . "</td>
+                <td class='sb-small'>" . $z['jmena_rodicu'] . "</td>
+                <td class='center'>" . $z['pocet_deti'] . "</td>
+                <td class='center' data-v='" . intval($z['odpracovano']) . "'>" . $z['odpracovano'] . "</td>
+                <td class='center' data-v='" . intval($z['pozadavek']) . "'>" . $z['pozadavek'] . "</td>
+                <td class='center $trida_rozdil' data-v='" . intval($z['rozdil']) . "'>" . intval($z['rozdil']) . "</td>
+                <td class='center' data-v='" . $z['poplatek'] . "'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
                 <td class='sb-small'>$brigady_str</td>
             </tr>";
         }
-        echo "</table>";
+        echo "</tbody></table>";
+        echo "<script>
+(function() {
+    var tbl = document.getElementById('sb-rocni-tabulka');
+    if (!tbl) return;
+    var sortCol = -1, sortAsc = true;
+    tbl.querySelectorAll('thead th[data-col]').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(th.getAttribute('data-col'));
+            var type = th.getAttribute('data-type');
+            if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+            tbl.querySelectorAll('thead th .sb-si').forEach(function(s) { s.textContent = ' ↕'; });
+            th.querySelector('.sb-si').textContent = sortAsc ? ' ▲' : ' ▼';
+            var tbody = tbl.querySelector('tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            rows.sort(function(a, b) {
+                var aCell = a.querySelectorAll('td')[col];
+                var bCell = b.querySelectorAll('td')[col];
+                if (!aCell || !bCell) return 0;
+                var aVal = type === 'num' ? parseFloat(aCell.getAttribute('data-v') || 0) : aCell.textContent.trim().toLowerCase();
+                var bVal = type === 'num' ? parseFloat(bCell.getAttribute('data-v') || 0) : bCell.textContent.trim().toLowerCase();
+                if (aVal < bVal) return sortAsc ? -1 : 1;
+                if (aVal > bVal) return sortAsc ? 1 : -1;
+                return 0;
+            });
+            rows.forEach(function(r) { tbody.appendChild(r); });
+            tbody.querySelectorAll('tr').forEach(function(r, i) {
+                var nc = r.querySelector('.sb-rownum');
+                if (nc) nc.textContent = i + 1;
+            });
+        });
+    });
+})();
+</script>";
 
         $export_url = add_query_arg([
             'sb_export' => 'rocni_vypis',
@@ -1617,43 +2243,13 @@ function sb_rocni_vypis() {
 }
 
 function sb_prehled_rodin() {
-    $current_user = wp_get_current_user();
-    $roles = $current_user->roles;
-    if (!array_intersect($roles, ['administrator', 'spravce_brigad'])) {
+    if (!sb_muze_videt_rodiny()) {
         return '<p>Nemáš oprávnění pro správu rodin.</p>';
     }
+    $smi_upravovat = sb_muze_upravovat_rodiny();
+    $je_spravce    = sb_je_spravce();
+    $revize        = sb_revize_stav();
 
-    $rodiny = get_posts([
-        'post_type'   => 'rodina',
-        'numberposts' => -1,
-        'orderby'     => 'title',
-        'order'       => 'ASC'
-    ]);
-    $vsichni_rodice = get_users(['role' => 'rodic']);
-    $zprava = '';
-
-    // Seřazení rodičů podle příjmení (z display_name sebere poslední slovo)
-    usort($vsichni_rodice, function($a, $b) {
-    $la = $a->last_name ?: array_slice(explode(' ', $a->display_name), -1)[0];
-    $lb = $b->last_name ?: array_slice(explode(' ', $b->display_name), -1)[0];
-    $fa = $a->first_name ?: $a->display_name;
-    $fb = $b->first_name ?: $b->display_name;
-    $cmp = strcasecmp($la, $lb);
-    return $cmp === 0 ? strcasecmp($fa, $fb) : $cmp;
-});
-
-    // Zjistit, kteří rodiče už jsou přiřazeni a ke které rodině
-    $obsazeni_rodice = [];
-    foreach ($rodiny as $r) {
-        $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
-        if (is_array($prirazeni)) {
-            foreach ($prirazeni as $rid) {
-                $obsazeni_rodice[$rid] = $r->ID;
-            }
-        }
-    }
-
-    // Seznam oddílů
     $oddily = [
         'Benjamínci',
         'Lišky (světlušky)',
@@ -1662,197 +2258,520 @@ function sb_prehled_rodin() {
         'Skauti',
         'Rangers a roveři'
     ];
+    $max_deti = 4;
 
-    // Uložení změn v rodině (název, rodiče, děti) – pouze při submitu tlačítka "Uložit rodinu"
-    if (isset($_POST['edit_rodina_id']) && isset($_POST['ulozit_rodinu'])) {
+    $nacti_rodiny = function() {
+        return get_posts([
+            'post_type'   => 'rodina',
+            'numberposts' => -1,
+            'orderby'     => 'title',
+            'order'       => 'ASC'
+        ]);
+    };
 
-        // Ověření nonce uložení rodiny
-        if (!isset($_POST['_wpnonce_ulozit_rodinu']) ||
-            !wp_verify_nonce($_POST['_wpnonce_ulozit_rodinu'], 'ulozit_rodinu')) {
+    // Rodiče už přiřazení k (neaktivní = nearchivované) rodině: [user_id => rodina_id]
+    $spocitej_obsazeni = function($rodiny) {
+        $obsazeni = [];
+        foreach ($rodiny as $r) {
+            if (sb_rodina_archiv($r->ID)) continue;
+            $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
+            if (is_array($prirazeni)) {
+                foreach ($prirazeni as $rid) {
+                    $obsazeni[intval($rid)] = $r->ID;
+                }
+            }
+        }
+        return $obsazeni;
+    };
 
-            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
-            $zprava .= "<script>setTimeout(function() { sbShowSection('prehled'); }, 100);</script>";
+    $vsichni_rodice = get_users(['role' => 'rodic']);
+    usort($vsichni_rodice, function($a, $b) {
+        $la = $a->last_name ?: array_slice(explode(' ', $a->display_name), -1)[0];
+        $lb = $b->last_name ?: array_slice(explode(' ', $b->display_name), -1)[0];
+        $fa = $a->first_name ?: $a->display_name;
+        $fb = $b->first_name ?: $b->display_name;
+        $cmp = strcasecmp($la, $lb);
+        return $cmp === 0 ? strcasecmp($fa, $fb) : $cmp;
+    });
 
+    $zprava      = '';
+    $otevrena_id = 0;
+
+    // ---------------------------------------------------------------
+    // Zpracování akcí
+    // ---------------------------------------------------------------
+    $je_akce = isset($_POST['ulozit_rodinu']) || isset($_POST['archivovat_rodinu']) || isset($_POST['obnovit_rodinu'])
+            || isset($_POST['smazat_dite']) || isset($_POST['confirm_delete_rodina']);
+
+    if ($je_akce) {
+        $post_id     = isset($_POST['edit_rodina_id']) ? intval($_POST['edit_rodina_id']) : 0;
+        $post_rodina = $post_id ? sb_get_rodina($post_id) : null;
+
+        if (!$smi_upravovat) {
+            $zprava .= sb_alert('Úpravy rodin jsou teď uzavřené. Otevřou se, když správce zahájí revizi.', 'error');
+        } elseif (!$post_rodina) {
+            $zprava .= sb_alert('Rodina nebyla nalezena.', 'error');
         } else {
+            $id = $post_rodina->ID;
+            $rodiny_pred = $nacti_rodiny();
+            $obsazeni    = $spocitej_obsazeni($rodiny_pred);
 
-            $id = intval($_POST['edit_rodina_id']);
-            $nazev = sanitize_text_field($_POST['novy_nazev']);
-            $vybrani_rodice = isset($_POST['rodice']) ? array_map('intval', $_POST['rodice']) : [];
+            // --- Uložení rodiny (název, rodiče, děti, odchody dětí) ---
+            if (isset($_POST['ulozit_rodinu'])) {
+                if (!isset($_POST['_wpnonce_ulozit_rodinu']) || !wp_verify_nonce($_POST['_wpnonce_ulozit_rodinu'], 'ulozit_rodinu')) {
+                    $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+                } else {
+                    $nazev = sanitize_text_field(wp_unslash(isset($_POST['novy_nazev']) ? $_POST['novy_nazev'] : ''));
+                    $vybrani_rodice = (isset($_POST['rodice']) && is_array($_POST['rodice'])) ? array_map('intval', $_POST['rodice']) : [];
 
-            // Děti z formuláře
-            $deti = [];
-            if (isset($_POST['deti']) && is_array($_POST['deti'])) {
-                foreach ($_POST['deti'] as $dite) {
-                    if (!empty($dite['jmeno'])) {
-                        $deti[] = [
-                            'jmeno' => sanitize_text_field($dite['jmeno']),
-                            'oddil' => sanitize_text_field($dite['oddil'])
-                        ];
+                    // Přiřadit lze jen uživatele s rolí rodič; stávající členy, kteří v nabídce nejsou, zachováme
+                    $povolene_ids = array_map(function($u) { return intval($u->ID); }, $vsichni_rodice);
+                    $vybrani_rodice = array_values(array_intersect($vybrani_rodice, $povolene_ids));
+                    $stavajici_rodice = get_post_meta($id, 'rodice_rodiny', true);
+                    $stavajici_rodice = is_array($stavajici_rodice) ? array_map('intval', $stavajici_rodice) : [];
+                    $vybrani_rodice = array_values(array_unique(array_merge($vybrani_rodice, array_diff($stavajici_rodice, $povolene_ids))));
+
+                    $konflikt = false;
+                    foreach ($vybrani_rodice as $rid) {
+                        if (isset($obsazeni[$rid]) && $obsazeni[$rid] != $id) { $konflikt = true; break; }
+                    }
+
+                    $stare_aktivni = get_post_meta($id, 'deti_rodiny', true);
+                    if (!is_array($stare_aktivni)) $stare_aktivni = [];
+                    $stare_aktivni = array_values($stare_aktivni);
+                    $archiv        = array_values(sb_deti_archiv($id));
+
+                    $chyba = '';
+                    $existujici_nazev = ($nazev !== '' && $nazev !== $post_rodina->post_title) ? sb_post_exists_by_title('rodina', $nazev) : 0;
+
+                    if ($nazev === '') {
+                        $chyba = 'Název rodiny nesmí být prázdný.';
+                    } elseif ($existujici_nazev && intval($existujici_nazev) !== $id) {
+                        $chyba = 'Rodina s tímto názvem už existuje.';
+                    } elseif ($konflikt) {
+                        $chyba = 'Někteří vybraní rodiče už patří do jiné rodiny.';
+                    }
+
+                    $aktivni       = [];
+                    $novy_archiv   = [];
+                    $odchody       = 0;
+                    $od_roku       = sb_rok_archivace();
+                    $dnes          = wp_date('Y-m-d');
+                    $radky         = (isset($_POST['deti']) && is_array($_POST['deti'])) ? $_POST['deti'] : [];
+                    $odeslane      = [];
+                    $zastarale_msg = 'Rodina byla mezitím změněna jiným uživatelem nebo byl formulář odeslán znovu. Načtěte stránku znovu a úpravy zopakujte.';
+
+                    if ($chyba === '') {
+                        foreach ($radky as $idx => $radek) {
+                            if (!is_array($radek)) continue;
+                            $idx      = intval($idx);
+                            $existuje = isset($stare_aktivni[$idx]) && is_array($stare_aktivni[$idx]);
+                            if ($existuje) $odeslane[] = $idx;
+
+                            // Řádek existujícího dítěte, které už v rodině není (zastaralý nebo opakovaně odeslaný formulář)
+                            if (!$existuje && isset($radek['puvodni']) && $radek['puvodni'] !== '') {
+                                $chyba = $zastarale_msg;
+                                break;
+                            }
+
+                            if ($existuje) {
+                                // Ochrana proti souběžné úpravě: řádek musí odpovídat uloženému dítěti
+                                $puvodni_form = sanitize_text_field(wp_unslash(isset($radek['puvodni']) ? $radek['puvodni'] : ''));
+                                $puvodni_db   = isset($stare_aktivni[$idx]['jmeno']) ? $stare_aktivni[$idx]['jmeno'] : '';
+                                if ($puvodni_form !== $puvodni_db) {
+                                    $chyba = $zastarale_msg;
+                                    break;
+                                }
+                            }
+
+                            $jmeno = trim(sanitize_text_field(wp_unslash(isset($radek['jmeno']) ? $radek['jmeno'] : '')));
+                            $oddil = sanitize_text_field(wp_unslash(isset($radek['oddil']) ? $radek['oddil'] : ''));
+                            $puvodni_oddil = $existuje && isset($stare_aktivni[$idx]['oddil']) ? $stare_aktivni[$idx]['oddil'] : '';
+
+                            if ($jmeno === '') {
+                                if (!$existuje) continue;
+                                $jmeno = $puvodni_db;
+                            }
+                            if (!in_array($oddil, $oddily, true) && $oddil !== $puvodni_oddil) {
+                                $oddil = $puvodni_oddil !== '' ? $puvodni_oddil : $oddily[0];
+                            }
+
+                            if ($existuje && !empty($radek['nechodi'])) {
+                                $poznamka = sanitize_text_field(wp_unslash(isset($radek['poznamka']) ? $radek['poznamka'] : ''));
+                                $novy_archiv[] = [
+                                    'jmeno'    => $jmeno,
+                                    'oddil'    => $oddil,
+                                    'od_roku'  => $od_roku,
+                                    'poznamka' => mb_substr($poznamka, 0, 200),
+                                    'datum'    => $dnes,
+                                ];
+                                $odchody++;
+                            } else {
+                                $aktivni[] = ['jmeno' => $jmeno, 'oddil' => $oddil];
+                            }
+                        }
+                        // Formulář musí obsahovat všechny stávající děti, jinak by nějaké tiše zmizelo
+                        if ($chyba === '') {
+                            foreach (array_keys($stare_aktivni) as $k) {
+                                if (!in_array($k, $odeslane, true)) { $chyba = $zastarale_msg; break; }
+                            }
+                        }
+                    }
+
+                    // Obnovení dětí z archivu
+                    $obnovit = (isset($_POST['obnovit']) && is_array($_POST['obnovit'])) ? array_map('intval', $_POST['obnovit']) : [];
+                    $zustava_v_archivu = [];
+                    foreach ($archiv as $ai => $ad) {
+                        if (in_array($ai, $obnovit, true) && is_array($ad)) {
+                            $aktivni[] = [
+                                'jmeno' => isset($ad['jmeno']) ? $ad['jmeno'] : '',
+                                'oddil' => isset($ad['oddil']) ? $ad['oddil'] : $oddily[0],
+                            ];
+                        } else {
+                            $zustava_v_archivu[] = $ad;
+                        }
+                    }
+
+                    if ($chyba === '' && count($aktivni) > $max_deti) {
+                        $chyba = 'Rodina může mít nejvýše ' . $max_deti . ' aktivní děti.';
+                    }
+
+                    if ($chyba !== '') {
+                        $zprava .= sb_alert($chyba, 'error');
+                    } else {
+                        wp_update_post(['ID' => $id, 'post_title' => $nazev]);
+                        update_post_meta($id, 'rodice_rodiny', $vybrani_rodice);
+                        update_post_meta($id, 'deti_rodiny', array_values($aktivni));
+                        $archiv_final = array_merge($zustava_v_archivu, $novy_archiv);
+                        if (empty($archiv_final)) {
+                            delete_post_meta($id, 'deti_archiv');
+                        } else {
+                            update_post_meta($id, 'deti_archiv', array_values($archiv_final));
+                        }
+                        delete_post_meta($id, 'pocet_deti'); // úklid starého pole, pokud existuje
+                        $zprava .= sb_alert('Rodina byla upravena.');
+                        if (empty($aktivni)) {
+                            $zprava .= sb_alert('Rodina nemá žádné aktivní dítě. Pokud už skauta nenavštěvuje nikdo z rodiny, přesuňte celou rodinu do archivu.', 'warning');
+                        }
+                    }
+                    $otevrena_id = $id;
+                }
+            }
+
+            // --- Archivace celé rodiny ---
+            if (isset($_POST['archivovat_rodinu'])) {
+                if (!isset($_POST['_wpnonce_archivovat_rodinu']) || !wp_verify_nonce($_POST['_wpnonce_archivovat_rodinu'], 'archivovat_rodinu')) {
+                    $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+                } elseif (sb_rodina_archiv($id)) {
+                    $zprava .= sb_alert('Rodina už je v archivu.', 'info');
+                } else {
+                    $poznamka = sanitize_text_field(wp_unslash(isset($_POST['archiv_poznamka']) ? $_POST['archiv_poznamka'] : ''));
+                    update_post_meta($id, 'rodina_archiv', [
+                        'od_roku'  => sb_rok_archivace(),
+                        'poznamka' => mb_substr($poznamka, 0, 200),
+                        'datum'    => wp_date('Y-m-d'),
+                    ]);
+                    $zprava .= sb_alert('Rodina byla přesunuta do archivu. Od roku ' . sb_rok_archivace() . ' se jí nebudou počítat požadavky na brigády.');
+                }
+            }
+
+            // --- Obnovení rodiny z archivu ---
+            if (isset($_POST['obnovit_rodinu'])) {
+                if (!isset($_POST['_wpnonce_obnovit_rodinu']) || !wp_verify_nonce($_POST['_wpnonce_obnovit_rodinu'], 'obnovit_rodinu')) {
+                    $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+                } else {
+                    $rodice_rodiny = get_post_meta($id, 'rodice_rodiny', true);
+                    $konflikt = false;
+                    if (is_array($rodice_rodiny)) {
+                        foreach ($rodice_rodiny as $rid) {
+                            if (isset($obsazeni[intval($rid)]) && $obsazeni[intval($rid)] != $id) { $konflikt = true; break; }
+                        }
+                    }
+                    if ($konflikt) {
+                        $zprava .= sb_alert('Rodinu nelze obnovit – někteří její rodiče jsou už přiřazeni k jiné rodině.', 'error');
+                    } else {
+                        delete_post_meta($id, 'rodina_archiv');
+                        $zprava .= sb_alert('Rodina byla obnovena z archivu.');
+                        $otevrena_id = $id;
                     }
                 }
             }
 
-            // Kontrola konfliktů rodičů (jiná rodina)
-            $konflikt = [];
-            foreach ($vybrani_rodice as $rid) {
-                if (isset($obsazeni_rodice[$rid]) && $obsazeni_rodice[$rid] != $id) {
-                    $konflikt[] = $rid;
+            // --- Trvalé odebrání dítěte (jen správce) ---
+            if (isset($_POST['smazat_dite'])) {
+                if (!$je_spravce) {
+                    $zprava .= sb_alert('Trvalé odebrání dítěte může provést jen správce.', 'error');
+                } elseif (!isset($_POST['_wpnonce_smazat_dite']) || !wp_verify_nonce($_POST['_wpnonce_smazat_dite'], 'smazat_dite')) {
+                    $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+                } else {
+                    $index = intval($_POST['smazat_dite']);
+                    $deti  = get_post_meta($id, 'deti_rodiny', true);
+                    if (is_array($deti) && isset($deti[$index])) {
+                        unset($deti[$index]);
+                        update_post_meta($id, 'deti_rodiny', array_values($deti));
+                        $zprava .= sb_alert('Dítě bylo odebráno.');
+                        $otevrena_id = $id;
+                    }
                 }
             }
 
-            if (!empty($konflikt)) {
-                $zprava = sb_alert('Někteří vybraní rodiče už patří do jiné rodiny.', 'error');
-            } else {
-                wp_update_post(['ID' => $id, 'post_title' => $nazev]);
-                update_post_meta($id, 'rodice_rodiny', $vybrani_rodice);
-                update_post_meta($id, 'deti_rodiny', $deti);
-                delete_post_meta($id, 'pocet_deti'); // uklid starého pole, pokud existuje
-                $zprava = sb_alert('Rodina byla upravena.');
-            }
-
-            $zprava .= "<script>setTimeout(function() { sbShowSection('prehled'); }, 100);</script>";
-        }
-    }
-
-    // Odebrání konkrétního dítěte – vlastní submit s nonce
-    if (isset($_POST['smazat_dite'])) {
-
-        if (!isset($_POST['_wpnonce_smazat_dite']) ||
-            !wp_verify_nonce($_POST['_wpnonce_smazat_dite'], 'smazat_dite')) {
-
-            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
-
-        } else {
-
-            $id = intval($_POST['edit_rodina_id']);
-            $index = intval($_POST['smazat_dite']);
-            $deti = get_post_meta($id, 'deti_rodiny', true);
-
-            if (is_array($deti) && isset($deti[$index])) {
-                unset($deti[$index]);
-                $deti = array_values($deti);
-                update_post_meta($id, 'deti_rodiny', $deti);
-                $zprava = sb_alert('Dítě bylo odebráno.');
-                $zprava .= "<script>setTimeout(function() { sbShowSection('prehled'); }, 100);</script>";
+            // --- Smazání rodiny (jen správce) ---
+            if (isset($_POST['confirm_delete_rodina'])) {
+                if (!$je_spravce) {
+                    $zprava .= sb_alert('Smazat rodinu může jen správce.', 'error');
+                } elseif (!isset($_POST['_wpnonce_smazat_rodinu']) || !wp_verify_nonce($_POST['_wpnonce_smazat_rodinu'], 'smazat_rodinu')
+                          || intval($_POST['confirm_delete_rodina']) !== $id) {
+                    $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+                } else {
+                    wp_delete_post($id, true);
+                    $zprava .= sb_alert('Rodina byla smazána.');
+                }
             }
         }
-    }
-
-    // Smazání rodiny – s ověřením nonce
-    if (isset($_POST['confirm_delete_rodina'])) {
-
-        if (!isset($_POST['_wpnonce_smazat_rodinu']) ||
-            !wp_verify_nonce($_POST['_wpnonce_smazat_rodinu'], 'smazat_rodinu')) {
-
-            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
-
-        } else {
-            wp_delete_post(intval($_POST['confirm_delete_rodina']), true);
-            $zprava = sb_alert('Rodina byla smazána.');
-            $zprava .= "<script>setTimeout(function() { sbShowSection('prehled'); }, 100);</script>";
-        }
-    }
-
-    // Výběr rodiny k editaci
-    if (isset($_POST['akce']) && $_POST['akce'] === 'vyber' && isset($_POST['vybrana_rodina'])) {
-        $vybrana_id = intval($_POST['vybrana_rodina']);
         $zprava .= "<script>setTimeout(function() { sbShowSection('prehled'); }, 100);</script>";
-    } else {
-        $vybrana_id = 0;
+    }
+
+    // ---------------------------------------------------------------
+    // Zobrazení
+    // ---------------------------------------------------------------
+    $rodiny   = $nacti_rodiny();
+    $obsazeni = $spocitej_obsazeni($rodiny);
+
+    $plne_jmeno = function($u) {
+        $j = trim($u->last_name . ' ' . $u->first_name);
+        return $j !== '' ? $j : $u->display_name;
+    };
+
+    $aktivni_rodiny   = [];
+    $archivovane      = [];
+    $deti_celkem      = 0;
+    foreach ($rodiny as $r) {
+        if (sb_rodina_archiv($r->ID)) { $archivovane[] = $r; continue; }
+        $aktivni_rodiny[] = $r;
+        $d = get_post_meta($r->ID, 'deti_rodiny', true);
+        $deti_celkem += is_array($d) ? count($d) : 0;
     }
 
     ob_start();
+    ?>
+    <style>
+        .sb-rod-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:12px; margin-top:12px; }
+        .sb-rod-card { box-sizing:border-box; min-width:0; max-width:100%; background:#fff; border:1px solid #d5dde5; border-radius:6px; padding:12px 14px; overflow-wrap:anywhere; }
+        .sb-rod-card.sb-rod-off { background:#f6f6f6; border-style:dashed; }
+        .sb-rod-head { font-size:15px; font-weight:700; color:#0073aa; margin-bottom:6px; }
+        .sb-rod-line { font-size:13px; color:#444; margin-bottom:6px; }
+        .sb-chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+        .sb-chip { display:inline-block; background:#e8f4fb; border:1px solid #b0d4ea; border-radius:14px; padding:2px 10px; font-size:12px; line-height:1.6; }
+        .sb-chip small { color:#555; }
+        .sb-chip-off { background:#eee; border-color:#ccc; color:#777; text-decoration:line-through; }
+        .sb-rod-edit { margin-top:8px; }
+        .sb-rod-edit > summary, .sb-archiv > summary { cursor:pointer; font-size:13px; font-weight:600; color:#0073aa; padding:4px 0; }
+        .sb-rod-sekce { margin:12px 0 4px; font-weight:600; font-size:13px; color:#444; }
+        .sb-dite-row { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:8px; padding:8px; border:1px solid #e5e5e5; border-radius:4px; background:#fafafa; box-sizing:border-box; max-width:100%; }
+        .sb-dite-row input[type=text], .sb-dite-row select { flex:1 1 140px; min-width:0; max-width:100%; }
+        .sb-dite-row .sb-nechodi { flex:0 0 auto; font-size:12px; color:#7a1c1e; white-space:nowrap; }
+        .sb-rod-check { display:block; font-weight:normal; font-size:13px; margin-bottom:4px; }
+        .sb-rod-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+        .sb-rod-toolbar input[type=text] { flex:1 1 220px; min-width:0; max-width:420px; }
+        .sb-rod-edit form, .sb-rod-edit .sb-rod-inline { max-width:100%; }
+        @media (max-width: 640px) {
+            .sb-rod-grid { grid-template-columns:minmax(0, 1fr); }
+        }
+    </style>
+    <?php
     echo "<h3 class='sb-section-title'>👥 Správa rodin</h3>";
     echo $zprava;
 
-    // Výběrový formulář
-    echo "<div class='sb-card'>";
-    echo "<form method='post' id='vyberRodinyForm' class='sb-form-row'>";
-    echo "<div class='sb-form-group sb-fg-inline'><label>Vyber rodinu k úpravě:</label>";
-    echo "<select name='vybrana_rodina' onchange='this.form.submit();'>";
-    echo "<option value='0'>-- vyber --</option>";
-    foreach ($rodiny as $r) {
-        $selected = ($r->ID == $vybrana_id) ? 'selected' : '';
-        echo "<option value='{$r->ID}' $selected>" . esc_html($r->post_title) . "</option>";
+    if ($revize['otevrena']) {
+        echo sb_alert('Revize rodin je otevřená. Změny (odchody dětí, archivace rodin) se projeví od roku ' . intval($revize['rok']) . '.', 'warning');
+    } elseif (!$smi_upravovat) {
+        echo sb_alert('Rodiny můžete teď jen prohlížet. Úpravy se otevřou, když správce zahájí revizi rodin.', 'info');
     }
-    echo "</select></div>";
-    echo "<input type='hidden' name='akce' value='vyber'>";
-    echo "</form>";
+
+    echo "<div class='sb-card'>";
+    echo "<div class='sb-rod-toolbar'>";
+    echo "<input type='text' id='sb-rod-hledat' placeholder='🔍 Hledat rodinu, rodiče nebo dítě…' autocomplete='off'>";
+    echo "<span class='sb-text-hint'>Rodin: " . count($aktivni_rodiny) . " · aktivních dětí: " . intval($deti_celkem) . "</span>";
+    echo "</div>";
     echo "</div>";
 
-    // Formulář pro úpravu vybrané rodiny
-    if ($vybrana_id) {
-        $r = get_post($vybrana_id);
-        $nazev = esc_attr($r->post_title);
-        $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
-        if (!is_array($prirazeni)) $prirazeni = [];
+    $vykresli_kartu = function($r, $archivni) use ($oddily, $max_deti, $smi_upravovat, $je_spravce, $vsichni_rodice, $obsazeni, $otevrena_id, $plne_jmeno) {
         $deti = get_post_meta($r->ID, 'deti_rodiny', true);
         if (!is_array($deti)) $deti = [];
+        $deti = array_values($deti);
+        $archiv_deti = array_values(sb_deti_archiv($r->ID));
+        $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
+        if (!is_array($prirazeni)) $prirazeni = [];
+        $info_archiv = sb_rodina_archiv($r->ID);
 
-        echo "<div class='sb-card'>";
-        echo "<h4 class='sb-card-title'>✏️ " . esc_html($r->post_title) . "</h4>";
-        echo "<form method='post'>";
-        wp_nonce_field('ulozit_rodinu', '_wpnonce_ulozit_rodinu');
-        echo "<input type='hidden' name='edit_rodina_id' value='{$r->ID}'>";
+        $rodice_html = [];
+        $hledat      = [mb_strtolower($r->post_title)];
+        foreach ($prirazeni as $rid) {
+            $u = get_userdata(intval($rid));
+            if ($u) {
+                $rodice_html[] = sb_format_rodic_jmeno($u);
+                $hledat[]      = mb_strtolower($plne_jmeno($u));
+            }
+        }
+        foreach ($deti as $d) {
+            if (is_array($d) && isset($d['jmeno'])) $hledat[] = mb_strtolower($d['jmeno']);
+        }
+        foreach ($archiv_deti as $d) {
+            if (is_array($d) && isset($d['jmeno'])) $hledat[] = mb_strtolower($d['jmeno']);
+        }
 
-        echo "<div class='sb-form-group'><label>Název rodiny:</label><input type='text' name='novy_nazev' value='$nazev' required></div>";
+        echo "<div class='sb-rod-card" . ($archivni ? " sb-rod-off" : "") . "' data-hledat='" . esc_attr(implode(' ', $hledat)) . "'>";
+        echo "<div class='sb-rod-head'>" . esc_html($r->post_title) . "</div>";
+        echo "<div class='sb-rod-line'>👤 " . (!empty($rodice_html) ? implode(', ', $rodice_html) : "<em>bez přiřazených rodičů</em>") . "</div>";
 
-        echo "<div class='sb-form-group'><label>Rodiče:</label>";
-        foreach ($vsichni_rodice as $u) {
-            $rodic_id = $u->ID;
-            // Zobrazit jen členy této rodiny a volné rodiče
-            $je_clen  = in_array($rodic_id, $prirazeni);
-            $je_jinde = isset($obsazeni_rodice[$rodic_id]) && $obsazeni_rodice[$rodic_id] != $r->ID;
-            if ($je_jinde) continue;
-            $checked = $je_clen ? 'checked' : '';
-            echo "<label class='sb-label-normal'><input type='checkbox' name='rodice[]' value='" . esc_attr($u->ID) . "' $checked> " . sb_format_rodic_jmeno($u) . "</label>";
+        echo "<div class='sb-chips'>";
+        if (empty($deti) && empty($archiv_deti)) {
+            echo "<span class='sb-text-hint'>Žádné děti</span>";
+        }
+        foreach ($deti as $d) {
+            if (!is_array($d)) continue;
+            echo "<span class='sb-chip'>" . esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " <small>(" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ")</small></span>";
+        }
+        foreach ($archiv_deti as $d) {
+            if (!is_array($d)) continue;
+            $titulek = 'Od roku ' . intval(isset($d['od_roku']) ? $d['od_roku'] : 0) . (!empty($d['poznamka']) ? ' – ' . $d['poznamka'] : '');
+            echo "<span class='sb-chip sb-chip-off' title='" . esc_attr($titulek) . "'>" . esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . "</span>";
         }
         echo "</div>";
 
-        echo "<div class='sb-form-group'><label>Děti (max. 4):</label>";
-        echo "<div id='deti-wrapper'>";
-        for ($index = 0; $index < 4; $index++) {
-            $jmeno_d = isset($deti[$index]['jmeno']) ? esc_attr($deti[$index]['jmeno']) : '';
-            $oddil_d = isset($deti[$index]['oddil']) ? esc_attr($deti[$index]['oddil']) : '';
-            echo "<div class='sb-children-row'>";
-            echo "<input type='text' name='deti[$index][jmeno]' value='$jmeno_d' placeholder='Jméno dítěte'>";
-            echo "<select name='deti[$index][oddil]'>";
-            foreach ($oddily as $o) {
-                $sel = ($o == $oddil_d) ? 'selected' : '';
-                echo "<option value='" . esc_attr($o) . "' $sel>" . esc_html($o) . "</option>";
-            }
-            echo "</select></div>";
+        if ($archivni && $info_archiv) {
+            echo "<div class='sb-text-hint'>V archivu od roku " . intval($info_archiv['od_roku']) . (!empty($info_archiv['poznamka']) ? " – " . esc_html($info_archiv['poznamka']) : "") . "</div>";
         }
-        echo "</div></div>";
 
-        echo "<div class='sb-btn-row'><input type='submit' name='ulozit_rodinu' value='💾 Uložit rodinu' class='sb-btn sb-btn-primary'></div>";
-        echo "</form>";
-
-        // Smazání jednotlivých dětí
-        if (!empty($deti)) {
-            echo "<div class='sb-action-section'>";
-            echo "<strong>Odebrat konkrétní dítě:</strong><br><br>";
-            foreach ($deti as $idx => $dite) {
-                $popis = esc_html(($dite['jmeno'] ?? '') . ' – ' . ($dite['oddil'] ?? ''));
-                echo "<form method='post' onsubmit='return confirm(\"Odebrat dítě?\")' style='display:inline-block; margin:0 6px 6px 0;'>";
-                wp_nonce_field('smazat_dite', '_wpnonce_smazat_dite');
-                echo "<input type='hidden' name='edit_rodina_id' value='{$r->ID}'>";
-                echo "<input type='hidden' name='smazat_dite' value='{$idx}'>";
-                echo "<input type='submit' value='🗑️ {$popis}' class='sb-btn sb-btn-danger sb-btn-sm'>";
+        if ($smi_upravovat) {
+            if ($archivni) {
+                echo "<form method='post' class='sb-rod-inline' style='margin-top:8px;'>";
+                wp_nonce_field('obnovit_rodinu', '_wpnonce_obnovit_rodinu');
+                echo "<input type='hidden' name='edit_rodina_id' value='" . intval($r->ID) . "'>";
+                echo "<input type='submit' name='obnovit_rodinu' value='↩️ Obnovit z archivu' class='sb-btn sb-btn-secondary sb-btn-sm'>";
                 echo "</form>";
-            }
-            echo "</div>";
-        }
+            } else {
+                echo "<details class='sb-rod-edit'" . ($otevrena_id === $r->ID ? " open" : "") . "><summary>✏️ Upravit</summary>";
+                echo "<form method='post'>";
+                wp_nonce_field('ulozit_rodinu', '_wpnonce_ulozit_rodinu');
+                echo "<input type='hidden' name='edit_rodina_id' value='" . intval($r->ID) . "'>";
 
-        // Smazání rodiny
-        echo "<div class='sb-action-section'>";
-        echo "<form method='post' onsubmit='return confirm(\"Opravdu smazat celou rodinu?\")'>";
-        wp_nonce_field('smazat_rodinu', '_wpnonce_smazat_rodinu');
-        echo "<input type='hidden' name='confirm_delete_rodina' value='{$r->ID}'>";
-        echo "<input type='submit' value='🗑️ Smazat rodinu' class='sb-btn sb-btn-danger'>";
-        echo "</form></div>";
-        echo "</div>"; // sb-card
+                echo "<div class='sb-rod-sekce'>Název rodiny</div>";
+                echo "<input type='text' name='novy_nazev' value='" . esc_attr($r->post_title) . "' required style='width:100%; max-width:100%;'>";
+
+                echo "<div class='sb-rod-sekce'>Rodiče</div>";
+                foreach ($vsichni_rodice as $u) {
+                    $je_clen  = in_array($u->ID, $prirazeni);
+                    $je_jinde = isset($obsazeni[$u->ID]) && $obsazeni[$u->ID] != $r->ID;
+                    if ($je_jinde) continue;
+                    echo "<label class='sb-rod-check'><input type='checkbox' name='rodice[]' value='" . esc_attr($u->ID) . "'" . ($je_clen ? " checked" : "") . "> " . sb_format_rodic_jmeno($u) . "</label>";
+                }
+
+                echo "<div class='sb-rod-sekce'>Děti (nejvýše " . intval($max_deti) . ")</div>";
+                $radku = max(count($deti), 0);
+                for ($i = 0; $i < $radku; $i++) {
+                    $jm = isset($deti[$i]['jmeno']) ? $deti[$i]['jmeno'] : '';
+                    $od = isset($deti[$i]['oddil']) ? $deti[$i]['oddil'] : '';
+                    echo "<div class='sb-dite-row'>";
+                    echo "<input type='hidden' name='deti[$i][puvodni]' value='" . esc_attr($jm) . "'>";
+                    echo "<input type='text' name='deti[$i][jmeno]' value='" . esc_attr($jm) . "' placeholder='Jméno dítěte' required>";
+                    echo "<select name='deti[$i][oddil]'>";
+                    $moznosti = $oddily;
+                    if ($od !== '' && !in_array($od, $moznosti, true)) array_unshift($moznosti, $od);
+                    foreach ($moznosti as $o) {
+                        echo "<option value='" . esc_attr($o) . "'" . ($o === $od ? " selected" : "") . ">" . esc_html($o) . "</option>";
+                    }
+                    echo "</select>";
+                    echo "<label class='sb-nechodi'><input type='checkbox' name='deti[$i][nechodi]' value='1'> Už nechodí</label>";
+                    echo "<input type='text' name='deti[$i][poznamka]' maxlength='200' placeholder='Poznámka k odchodu (volitelné)'>";
+                    echo "</div>";
+                }
+                for ($i = $radku; $i < $max_deti; $i++) {
+                    echo "<div class='sb-dite-row'>";
+                    echo "<input type='text' name='deti[$i][jmeno]' value='' placeholder='Přidat dítě – jméno'>";
+                    echo "<select name='deti[$i][oddil]'>";
+                    foreach ($oddily as $o) {
+                        echo "<option value='" . esc_attr($o) . "'>" . esc_html($o) . "</option>";
+                    }
+                    echo "</select></div>";
+                }
+
+                if (!empty($archiv_deti)) {
+                    echo "<div class='sb-rod-sekce'>Děti v archivu</div>";
+                    foreach ($archiv_deti as $ai => $d) {
+                        if (!is_array($d)) continue;
+                        $popis = esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " (" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ") – od roku " . intval(isset($d['od_roku']) ? $d['od_roku'] : 0);
+                        if (!empty($d['poznamka'])) $popis .= " – " . esc_html($d['poznamka']);
+                        echo "<label class='sb-rod-check'><input type='checkbox' name='obnovit[]' value='" . intval($ai) . "'> Obnovit: $popis</label>";
+                    }
+                }
+
+                echo "<div class='sb-btn-row'><input type='submit' name='ulozit_rodinu' value='💾 Uložit rodinu' class='sb-btn sb-btn-primary'></div>";
+                echo "</form>";
+
+                echo "<div class='sb-action-section'>";
+                echo "<form method='post' class='sb-rod-inline' onsubmit='return confirm(\"Přesunout celou rodinu do archivu? Od příštího roku se jí nebudou počítat požadavky na brigády.\")'>";
+                wp_nonce_field('archivovat_rodinu', '_wpnonce_archivovat_rodinu');
+                echo "<input type='hidden' name='edit_rodina_id' value='" . intval($r->ID) . "'>";
+                echo "<div class='sb-rod-sekce' style='margin-top:0;'>Celá rodina už skauta nenavštěvuje</div>";
+                echo "<input type='text' name='archiv_poznamka' maxlength='200' placeholder='Poznámka (volitelné)' style='width:100%; max-width:100%; margin-bottom:6px;'>";
+                echo "<input type='submit' name='archivovat_rodinu' value='📦 Přesunout rodinu do archivu' class='sb-btn sb-btn-secondary'>";
+                echo "</form></div>";
+
+                if ($je_spravce) {
+                    echo "<div class='sb-action-section'><div class='sb-rod-sekce' style='margin-top:0;'>Jen pro správce – trvalé smazání</div>";
+                    foreach ($deti as $idx => $dite) {
+                        $popis = esc_html((isset($dite['jmeno']) ? $dite['jmeno'] : '') . ' – ' . (isset($dite['oddil']) ? $dite['oddil'] : ''));
+                        echo "<form method='post' onsubmit='return confirm(\"Trvale odebrat dítě? Data se smažou.\")' style='display:inline-block; margin:0 6px 6px 0;'>";
+                        wp_nonce_field('smazat_dite', '_wpnonce_smazat_dite');
+                        echo "<input type='hidden' name='edit_rodina_id' value='" . intval($r->ID) . "'>";
+                        echo "<input type='hidden' name='smazat_dite' value='" . intval($idx) . "'>";
+                        echo "<input type='submit' value='🗑️ {$popis}' class='sb-btn sb-btn-danger sb-btn-sm'>";
+                        echo "</form>";
+                    }
+                    echo "<form method='post' onsubmit='return confirm(\"Opravdu trvale smazat celou rodinu?\")' style='margin-top:6px;'>";
+                    wp_nonce_field('smazat_rodinu', '_wpnonce_smazat_rodinu');
+                    echo "<input type='hidden' name='edit_rodina_id' value='" . intval($r->ID) . "'>";
+                    echo "<input type='hidden' name='confirm_delete_rodina' value='" . intval($r->ID) . "'>";
+                    echo "<input type='submit' value='🗑️ Smazat rodinu' class='sb-btn sb-btn-danger sb-btn-sm'>";
+                    echo "</form></div>";
+                }
+                echo "</details>";
+            }
+        }
+        echo "</div>"; // .sb-rod-card
+    };
+
+    echo "<div class='sb-rod-grid'>";
+    foreach ($aktivni_rodiny as $r) {
+        $vykresli_kartu($r, false);
     }
+    echo "</div>";
+    if (empty($aktivni_rodiny)) {
+        echo "<p class='sb-text-muted'>Zatím nejsou žádné rodiny.</p>";
+    }
+
+    if (!empty($archivovane)) {
+        echo "<details class='sb-archiv' style='margin-top:20px;'><summary>📦 Archiv rodin (" . count($archivovane) . ")</summary>";
+        echo "<div class='sb-rod-grid'>";
+        foreach ($archivovane as $r) {
+            $vykresli_kartu($r, true);
+        }
+        echo "</div></details>";
+    }
+
+    echo "<script>
+(function() {
+    var inp = document.getElementById('sb-rod-hledat');
+    if (!inp) return;
+    inp.addEventListener('input', function() {
+        var q = inp.value.toLowerCase().trim();
+        document.querySelectorAll('.sb-rod-card[data-hledat]').forEach(function(c) {
+            c.style.display = (!q || c.getAttribute('data-hledat').indexOf(q) > -1) ? '' : 'none';
+        });
+    });
+})();
+</script>";
 
     return ob_get_clean();
 }
@@ -1875,8 +2794,12 @@ function sb_moje_brigady_shortcode() {
     foreach ($rodiny as $r) {
         $rodice = get_post_meta($r->ID, 'rodice_rodiny', true);
         if ((is_array($rodice) && in_array($user_id, $rodice)) || $rodice == $user_id) {
-            $rodina = $r;
-            break;
+            // Aktivní (nearchivovaná) rodina má přednost před archivovanou
+            if (!$rodina) $rodina = $r;
+            if (!sb_rodina_archiv($r->ID)) {
+                $rodina = $r;
+                break;
+            }
         }
     }
 
@@ -1896,11 +2819,22 @@ function sb_moje_brigady_shortcode() {
             if (isset($_POST['prihlasit_brigadu']) && intval($_POST['brigada_id'])) {
                 $id    = intval($_POST['brigada_id']);
                 $pocet = max(1, intval($_POST['pocet_osob']));
-                update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
-                wp_cache_delete($id, 'post_meta');
-                sb_notify_prihlaseni($id, $rodina_id, $pocet);
-                sb_notify_spravci_zmena($id);
-                $zprava = "<p style='color:green;'>Byli jste přihlášeni na brigádu.</p>";
+                $potrebujeme = intval(get_post_meta($id, 'pozadovany_pocet', true));
+                $celkem_uz = 0;
+                foreach (get_post_meta($id) as $mk => $mv) {
+                    if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                        $celkem_uz += intval($mv[0]);
+                    }
+                }
+                if ($potrebujeme > 0 && $celkem_uz + $pocet > $potrebujeme) {
+                    $zprava = "<p style='color:red;'>Brigáda je již plná – přihlášeno $celkem_uz z $potrebujeme míst.</p>";
+                } else {
+                    update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
+                    wp_cache_delete($id, 'post_meta');
+                    sb_notify_prihlaseni($id, $rodina_id, $pocet);
+                    sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' se přihlásila (' . $pocet . ' ' . ($pocet === 1 ? 'osoba' : ($pocet <= 4 ? 'osoby' : 'osob')) . ').');
+                    $zprava = "<p style='color:green;'>Byli jste přihlášeni na brigádu.</p>";
+                }
             }
 
             if (isset($_POST['upravit_brigadu']) && intval($_POST['brigada_id'])) {
@@ -1909,7 +2843,7 @@ function sb_moje_brigady_shortcode() {
                 update_post_meta($id, 'ucastnici_' . $rodina_id, $pocet);
                 wp_cache_delete($id, 'post_meta');
                 sb_notify_zmena($id, $rodina_id, $pocet);
-                sb_notify_spravci_zmena($id);
+                sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' změnila počet účastníků na ' . $pocet . '.');
                 $zprava = "<p style='color:green;'>Přihláška byla upravena.</p>";
             }
 
@@ -1918,7 +2852,7 @@ function sb_moje_brigady_shortcode() {
                 delete_post_meta($id, 'ucastnici_' . $rodina_id);
                 wp_cache_delete($id, 'post_meta');
                 sb_notify_odhlaseni($id, $rodina_id);
-                sb_notify_spravci_zmena($id);
+                sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' se odhlásila.');
                 $zprava = "<p style='color:orange;'>Byli jste odhlášeni z brigády.</p>";
             }
         }
@@ -1926,7 +2860,7 @@ function sb_moje_brigady_shortcode() {
 
     // --- Seznam dětí ---
     $deti       = get_post_meta($rodina_id, 'deti_rodiny', true);
-    $pocet_deti = is_array($deti) ? count($deti) : 0;
+    $pocet_deti = is_array($deti) ? count($deti) : 0; // aktuální počet (pro zobrazení)
 
     // --- Roční logika ---
     $tz        = wp_timezone();
@@ -1945,6 +2879,10 @@ function sb_moje_brigady_shortcode() {
         $rok_druhy   = null;
     }
 
+    $rodina_obj      = get_post($rodina_id);
+    $v_aktivnim_roce = sb_rodina_v_roce($rodina_obj, $rok_aktivni);
+    $v_druhem_roce   = $rok_druhy ? sb_rodina_v_roce($rodina_obj, $rok_druhy) : false;
+
     // --- Požadavky pro aktivní rok ---
     $pozadavky_vse = get_option('pozadavky_dle_roku', []);
     $pozadavky_rok = isset($pozadavky_vse[$rok_aktivni]) ? $pozadavky_vse[$rok_aktivni] : null;
@@ -1952,12 +2890,13 @@ function sb_moje_brigady_shortcode() {
     $pozadavek = 0;
     $sazba     = 0;
 
-    if ($pozadavky_rok) {
-        if ($pocet_deti == 1) {
+    if ($pozadavky_rok && $v_aktivnim_roce) {
+        $pocet_deti_aktivni = sb_pocet_deti_pro_rok($rodina_id, $rok_aktivni);
+        if ($pocet_deti_aktivni == 1) {
             $pozadavek = intval($pozadavky_rok['1']);
-        } elseif ($pocet_deti == 2) {
+        } elseif ($pocet_deti_aktivni == 2) {
             $pozadavek = intval($pozadavky_rok['2']);
-        } elseif ($pocet_deti >= 3) {
+        } elseif ($pocet_deti_aktivni >= 3) {
             $pozadavek = intval($pozadavky_rok['3']);
         }
         $sazba = isset($pozadavky_rok['sazba']) ? floatval($pozadavky_rok['sazba']) : 0;
@@ -1996,14 +2935,37 @@ function sb_moje_brigady_shortcode() {
         if ($datum_obj && $datum_obj < $dnes) {
             if ($celkem_hodin_brigady !== null) {
                 $n_osob_abs = max(1, intval($prihlaseno));
-                $hodiny_os_raw = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
+                $hodiny_os_raw  = get_post_meta($b->ID, 'odpracovano_' . $rodina_id, true);
+                $hodiny_osob_arr = get_post_meta($b->ID, 'hodiny_osob_' . $rodina_id, true);
                 $zaznamy_absolvovane[] = [
-                    'nazev'      => $b->post_title,
-                    'datum'      => $datum_raw,
-                    'hodiny'     => ($hodiny_os_raw !== '' && $hodiny_os_raw !== null) ? intval($hodiny_os_raw) : null,
-                    'pocet_osob' => $n_osob_abs,
-                    'celkem_h'   => $celkem_hodin_brigady,
+                    'nazev'       => $b->post_title,
+                    'datum'       => $datum_raw,
+                    'hodiny'      => ($hodiny_os_raw !== '' && $hodiny_os_raw !== null) ? intval($hodiny_os_raw) : null,
+                    'hodiny_osob' => (is_array($hodiny_osob_arr) && !empty($hodiny_osob_arr)) ? $hodiny_osob_arr : null,
+                    'pocet_osob'  => $n_osob_abs,
+                    'celkem_h'    => $celkem_hodin_brigady,
                 ];
+            } else {
+                $walkins_b = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                if (is_array($walkins_b)) {
+                    foreach ($walkins_b as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $rodina->post_title) {
+                            $walkin_h    = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_brigady = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_brigady === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_brigady === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $zaznamy_absolvovane[] = [
+                                'nazev'       => $b->post_title,
+                                'datum'       => $datum_raw,
+                                'hodiny'      => intval($w['hodiny']),
+                                'hodiny_osob' => null,
+                                'pocet_osob'  => intval($w['pocet']),
+                                'celkem_h'    => $walkin_h,
+                            ];
+                            break;
+                        }
+                    }
+                }
             }
         } else {
             // Celkový počet přihlášených přes všechny rodiny
@@ -2028,14 +2990,38 @@ function sb_moje_brigady_shortcode() {
                     'je_plno'             => $je_plno,
                 ];
             } else {
-                $zaznamy_neprihlasene[] = [
-                    'id'                  => $b->ID,
-                    'nazev'               => $b->post_title,
-                    'datum'               => $datum_raw,
-                    'celkem_prihlasenych' => $celkem_prihlasenych,
-                    'potrebujeme'         => $potrebujeme_b,
-                    'je_plno'             => $je_plno,
-                ];
+                $walkins_dnes = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                $walkin_found = false;
+                if (is_array($walkins_dnes)) {
+                    foreach ($walkins_dnes as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $rodina->post_title) {
+                            $walkin_h    = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_brigady = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_brigady === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_brigady === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $zaznamy_absolvovane[] = [
+                                'nazev'       => $b->post_title,
+                                'datum'       => $datum_raw,
+                                'hodiny'      => intval($w['hodiny']),
+                                'hodiny_osob' => null,
+                                'pocet_osob'  => intval($w['pocet']),
+                                'celkem_h'    => $walkin_h,
+                            ];
+                            $walkin_found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!$walkin_found) {
+                    $zaznamy_neprihlasene[] = [
+                        'id'                  => $b->ID,
+                        'nazev'               => $b->post_title,
+                        'datum'               => $datum_raw,
+                        'celkem_prihlasenych' => $celkem_prihlasenych,
+                        'potrebujeme'         => $potrebujeme_b,
+                        'je_plno'             => $je_plno,
+                    ];
+                }
             }
         }
     }
@@ -2051,12 +3037,13 @@ function sb_moje_brigady_shortcode() {
     $zbyva_druhy     = 0;
     $poplatek_druhy  = 0;
 
-    if ($rok_druhy && $pozadavky_druhy) {
-        if ($pocet_deti == 1) {
+    if ($rok_druhy && $pozadavky_druhy && $v_druhem_roce) {
+        $pocet_deti_druhy = sb_pocet_deti_pro_rok($rodina_id, $rok_druhy);
+        if ($pocet_deti_druhy == 1) {
             $pozadavek_druhy = intval($pozadavky_druhy['1']);
-        } elseif ($pocet_deti == 2) {
+        } elseif ($pocet_deti_druhy == 2) {
             $pozadavek_druhy = intval($pozadavky_druhy['2']);
-        } elseif ($pocet_deti >= 3) {
+        } elseif ($pocet_deti_druhy >= 3) {
             $pozadavek_druhy = intval($pozadavky_druhy['3']);
         }
         $sazba_druhy    = isset($pozadavky_druhy['sazba']) ? floatval($pozadavky_druhy['sazba']) : 0;
@@ -2115,8 +3102,11 @@ function sb_moje_brigady_shortcode() {
     echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;'>";
 
     $barva_zbyva = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
-    echo "<div style='flex:0 0 auto; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
+    echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
     echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
+    if (!$v_aktivnim_roce) {
+        echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>" . esc_html(sb_poznamka_mimo_rok($rodina_obj, $rok_aktivni)) . "</p>";
+    }
     echo "<table class='sbf-req-table'>";
     echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
@@ -2127,8 +3117,11 @@ function sb_moje_brigady_shortcode() {
 
     if ($rok_druhy) {
         $barva_zbyva_d = ($zbyva_druhy === 0) ? '#2e7d32' : '#c0392b';
-        echo "<div style='flex:0 0 auto; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
+        echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
         echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_druhy</div>";
+        if (!$v_druhem_roce) {
+            echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>" . esc_html(sb_poznamka_mimo_rok($rodina_obj, $rok_druhy)) . "</p>";
+        }
         echo "<table class='sbf-req-table'>";
         echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
@@ -2149,15 +3142,22 @@ function sb_moje_brigady_shortcode() {
     if ($zaznamy_absolvovane) {
         usort($zaznamy_absolvovane, fn($a, $b) => strcmp($b['datum'], $a['datum']));
         echo "<table class='sbf-table'>";
-        echo "<tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hod./os.</th><th>Celkem</th></tr>";
+        echo "<tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hodiny</th><th>Celkem</th></tr>";
         foreach ($zaznamy_absolvovane as $z) {
             $d_obj = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
             $d_fmt = $d_obj ? $d_obj->format('d. m. Y') : esc_html($z['datum']);
+            if ($z['hodiny_osob'] !== null) {
+                $hodiny_cell = implode(', ', array_map(fn($h) => $h . ' h', $z['hodiny_osob']));
+            } elseif ($z['hodiny'] !== null) {
+                $hodiny_cell = $z['hodiny'] . ' h/os.';
+            } else {
+                $hodiny_cell = '<span style="color:#999;">–</span>';
+            }
             echo "<tr>";
             echo "<td>" . esc_html($z['nazev']) . "</td>";
             echo "<td class='c'>" . $d_fmt . "</td>";
             echo "<td class='c'>" . intval($z['pocet_osob']) . "</td>";
-            echo "<td class='c'>" . ($z['hodiny'] !== null ? intval($z['hodiny']) . ' h/os.' : '<span style="color:#999;">–</span>') . "</td>";
+            echo "<td class='c'>" . $hodiny_cell . "</td>";
             echo "<td class='c'><strong>" . intval($z['celkem_h']) . " h</strong></td>";
             echo "</tr>";
         }
@@ -2200,6 +3200,7 @@ function sb_moje_brigady_shortcode() {
             echo "<input type='hidden' name='brigada_id' value='" . intval($z['id']) . "'>";
             echo "<label>Počet:</label>";
             echo "<input type='number' name='pocet_osob' min='1' value='" . intval($z['pocet_osob']) . "' required class='sbf-num'>";
+            echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
             echo "<input type='submit' name='upravit_brigadu' value='💾 Uložit' class='sbf-btn sbf-btn-blue'>";
             echo "<input type='submit' name='odhlasit_brigadu' value='✕ Odhlásit' class='sbf-btn sbf-btn-red' onclick='return confirm(\"Opravdu se chcete odhlásit?\");'>";
             echo "</form>";
@@ -2244,6 +3245,7 @@ function sb_moje_brigady_shortcode() {
                 echo "<input type='hidden' name='brigada_id' value='" . intval($z['id']) . "'>";
                 echo "<label>Počet osob:</label>";
                 echo "<input type='number' name='pocet_osob' min='1' value='1' required class='sbf-num'>";
+                echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
                 echo "<input type='submit' name='prihlasit_brigadu' value='✓ Přihlásit se' class='sbf-btn sbf-btn-green'>";
                 echo "</form>";
             }
@@ -2260,6 +3262,274 @@ function sb_moje_brigady_shortcode() {
 }
 
 add_shortcode('moje_brigady', 'sb_moje_brigady_shortcode');
+
+// =====================================================================
+// ADMIN TAB: Rodiny dle brigád – read-only přehled vybrané rodiny
+// =====================================================================
+function sb_rodiny_dle_brigad_tab() {
+    $rodiny = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+    $vybrana_rodina_id = isset($_POST['vybrana_rodina_admin']) ? intval($_POST['vybrana_rodina_admin']) : 0;
+
+    ob_start();
+    echo "<h3 class='sb-section-title'>👪 Rodiny dle brigád</h3>";
+
+    echo "<div class='sb-card'>";
+    echo "<form method='post' class='sb-form-row'>";
+    echo "<div class='sb-form-group sb-fg-inline'><label>Vyber rodinu:</label><select name='vybrana_rodina_admin'>";
+    foreach ($rodiny as $r) {
+        $sel = ($vybrana_rodina_id === $r->ID) ? 'selected' : '';
+        echo "<option value='" . intval($r->ID) . "' $sel>" . esc_html($r->post_title) . "</option>";
+    }
+    echo "</select></div>";
+    echo "<input type='submit' name='zobraz_rodinu_admin' value='Zobrazit' class='sb-btn sb-btn-primary'>";
+    echo "</form>";
+    echo "</div>";
+
+    if (!$vybrana_rodina_id && !empty($rodiny)) {
+        return ob_get_clean();
+    }
+
+    if (!$vybrana_rodina_id) $vybrana_rodina_id = $rodiny[0]->ID;
+
+    // --- Data rodiny ---
+    $nazev_rodiny = get_the_title($vybrana_rodina_id);
+    $deti         = get_post_meta($vybrana_rodina_id, 'deti_rodiny', true);
+    $pocet_deti   = is_array($deti) ? count($deti) : 0;
+
+    $tz       = wp_timezone();
+    $dnes     = new DateTime('today', $tz);
+    $mesic    = intval($dnes->format('m'));
+    $rok_nyni = intval($dnes->format('Y'));
+
+    if ($mesic === 12) {
+        $rok_aktivni = $rok_nyni; $rok_druhy = $rok_nyni + 1;
+    } elseif ($mesic <= 2) {
+        $rok_aktivni = $rok_nyni; $rok_druhy = $rok_nyni - 1;
+    } else {
+        $rok_aktivni = $rok_nyni; $rok_druhy = null;
+    }
+
+    $vybrana_rodina_obj = get_post($vybrana_rodina_id);
+    $v_aktivnim_roce    = sb_rodina_v_roce($vybrana_rodina_obj, $rok_aktivni);
+    $v_druhem_roce      = $rok_druhy ? sb_rodina_v_roce($vybrana_rodina_obj, $rok_druhy) : false;
+
+    $pozadavky_vse = get_option('pozadavky_dle_roku', []);
+    $pozadavky_rok = isset($pozadavky_vse[$rok_aktivni]) ? $pozadavky_vse[$rok_aktivni] : null;
+    $pozadavek = $sazba = 0;
+    if ($pozadavky_rok && $v_aktivnim_roce) {
+        $pozadavek = intval($pozadavky_rok[min(sb_pocet_deti_pro_rok($vybrana_rodina_id, $rok_aktivni), 3)] ?? 0);
+        $sazba     = floatval($pozadavky_rok['sazba'] ?? 0);
+    }
+
+    $brigady             = get_posts(['post_type' => 'brigada', 'numberposts' => -1]);
+    $odpracovano_aktivni = 0;
+    $odpracovano_druhy   = 0;
+    $absolvovane         = [];
+    $nadchazejici        = [];
+    $neprihlasene        = [];
+
+    foreach ($brigady as $b) {
+        $datum_raw  = get_post_meta($b->ID, 'datum_brigady', true);
+        $datum_obj  = DateTime::createFromFormat('Y-m-d', $datum_raw, $tz);
+        $prihlaseno = get_post_meta($b->ID, 'ucastnici_' . $vybrana_rodina_id, true);
+        $celkem_h   = sb_celkem_hodin($b->ID, $vybrana_rodina_id);
+
+        if ($celkem_h !== null) {
+            $rok_b = $datum_obj ? intval($datum_obj->format('Y')) : null;
+            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $celkem_h;
+            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $celkem_h;
+        }
+
+        if ($datum_obj && $datum_obj < $dnes) {
+            if ($celkem_h !== null) {
+                $h_os = get_post_meta($b->ID, 'odpracovano_' . $vybrana_rodina_id, true);
+                $absolvovane[] = [
+                    'nazev'    => $b->post_title,
+                    'datum'    => $datum_raw,
+                    'hodiny'   => ($h_os !== '' && $h_os !== null) ? intval($h_os) : null,
+                    'pocet'    => max(1, intval($prihlaseno)),
+                    'celkem_h' => $celkem_h,
+                ];
+            } else {
+                $walkins_b = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                if (is_array($walkins_b)) {
+                    foreach ($walkins_b as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $nazev_rodiny) {
+                            $walkin_h = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_b    = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $absolvovane[] = [
+                                'nazev'    => $b->post_title,
+                                'datum'    => $datum_raw,
+                                'hodiny'   => intval($w['hodiny']),
+                                'pocet'    => intval($w['pocet']),
+                                'celkem_h' => $walkin_h,
+                            ];
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            $meta_b = get_post_meta($b->ID);
+            $celkem_prihlasen = 0;
+            foreach ($meta_b as $mk => $mv) {
+                if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') $celkem_prihlasen += intval($mv[0]);
+            }
+            $potrebujeme = intval(get_post_meta($b->ID, 'pozadovany_pocet', true));
+            if ($prihlaseno) {
+                $nadchazejici[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'pocet' => intval($prihlaseno), 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme];
+            } else {
+                $walkins_dnes = get_post_meta($b->ID, 'walkin_ucastnici', true);
+                $walkin_found = false;
+                if (is_array($walkins_dnes)) {
+                    foreach ($walkins_dnes as $w) {
+                        if (isset($w['jmeno']) && $w['jmeno'] === $nazev_rodiny) {
+                            $walkin_h = intval($w['pocet']) * intval($w['hodiny']);
+                            $rok_b    = $datum_obj ? intval($datum_obj->format('Y')) : null;
+                            if ($rok_b === $rok_aktivni) $odpracovano_aktivni += $walkin_h;
+                            elseif ($rok_druhy && $rok_b === $rok_druhy) $odpracovano_druhy += $walkin_h;
+                            $absolvovane[] = [
+                                'nazev'    => $b->post_title,
+                                'datum'    => $datum_raw,
+                                'hodiny'   => intval($w['hodiny']),
+                                'pocet'    => intval($w['pocet']),
+                                'celkem_h' => $walkin_h,
+                            ];
+                            $walkin_found = true;
+                            break;
+                        }
+                    }
+                }
+                if (!$walkin_found) {
+                    $je_plno = ($potrebujeme > 0 && $celkem_prihlasen >= $potrebujeme);
+                    $neprihlasene[] = ['nazev' => $b->post_title, 'datum' => $datum_raw, 'celkem' => $celkem_prihlasen, 'potrebujeme' => $potrebujeme, 'je_plno' => $je_plno];
+                }
+            }
+        }
+    }
+
+    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni);
+    $poplatek = $zbyva * $sazba;
+
+    $pozadavky_druhy = ($rok_druhy && isset($pozadavky_vse[$rok_druhy])) ? $pozadavky_vse[$rok_druhy] : null;
+    $pozadavek_druhy = $sazba_druhy = $zbyva_druhy = $poplatek_druhy = 0;
+    if ($rok_druhy && $pozadavky_druhy && $v_druhem_roce) {
+        $pozadavek_druhy = intval($pozadavky_druhy[min(sb_pocet_deti_pro_rok($vybrana_rodina_id, $rok_druhy), 3)] ?? 0);
+        $sazba_druhy     = floatval($pozadavky_druhy['sazba'] ?? 0);
+        $zbyva_druhy     = max(0, $pozadavek_druhy - $odpracovano_druhy);
+        $poplatek_druhy  = $zbyva_druhy * $sazba_druhy;
+    }
+
+    // --- Výpis ---
+    echo "<div style='font-size:13px; margin:8px 0 12px;'>Rodina: <strong>" . esc_html($nazev_rodiny) . "</strong> &nbsp;·&nbsp; Děti: <strong>$pocet_deti</strong>";
+    if (is_array($deti) && !empty($deti)) {
+        echo " — " . implode(', ', array_map(fn($d) => esc_html($d['jmeno']) . ' (' . esc_html($d['oddil']) . ')', $deti));
+    }
+    echo "</div>";
+
+    // Finanční přehled
+    echo "<h5 class='sbf-col-title' style='margin-bottom:10px;'>📘 Přehled brigádnických požadavků</h5>";
+    echo "<div style='display:flex; flex-wrap:wrap; gap:12px; margin-bottom:16px;'>";
+
+    $barva_z = ($zbyva === 0) ? '#2e7d32' : '#c0392b';
+    echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #b0d4ea; border-radius:4px; padding:8px 14px; background:#f0f8ff; font-size:13px;'>";
+    echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_aktivni</div>";
+    if (!$v_aktivnim_roce) {
+        echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>" . esc_html(sb_poznamka_mimo_rok($vybrana_rodina_obj, $rok_aktivni)) . "</p>";
+    }
+    echo "<table class='sbf-req-table'>";
+    echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_z) . ";'>$zbyva h</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
+    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong></td></tr>";
+    echo "</table></div>";
+
+    if ($rok_druhy && $pozadavky_druhy) {
+        $barva_zd = ($zbyva_druhy === 0) ? '#2e7d32' : '#c0392b';
+        echo "<div style='flex:1 1 auto; min-width:0; max-width:100%; box-sizing:border-box; border:1px solid #ddd; border-radius:4px; padding:8px 14px; background:#f9f9f9; font-size:13px;'>";
+        echo "<div style='font-weight:600; margin-bottom:4px;'>Rok $rok_druhy</div>";
+        if (!$v_druhem_roce) {
+            echo "<p style='font-size:12px; color:#666; margin:4px 0 6px;'>" . esc_html(sb_poznamka_mimo_rok($vybrana_rodina_obj, $rok_druhy)) . "</p>";
+        }
+        echo "<table class='sbf-req-table'>";
+        echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zd) . ";'>$zbyva_druhy h</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
+        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong></td></tr>";
+        echo "</table></div>";
+    }
+    echo "</div>";
+
+    // Tři sloupce
+    echo "<div class='sbf-cols'>";
+
+    // Absolvované
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>✅ Absolvované brigády</h5>";
+    if ($absolvovane) {
+        usort($absolvovane, fn($a, $b) => strcmp($b['datum'], $a['datum']));
+        echo "<table class='sbf-table'><tr><th>Brigáda</th><th>Datum</th><th>Osob</th><th>Hod./os.</th><th>Celkem</th></tr>";
+        foreach ($absolvovane as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            echo "<tr><td>" . esc_html($z['nazev']) . "</td><td class='c'>" . ($d ? $d->format('d. m. Y') : esc_html($z['datum'])) . "</td>";
+            echo "<td class='c'>" . $z['pocet'] . "</td>";
+            echo "<td class='c'>" . ($z['hodiny'] !== null ? $z['hodiny'] . ' h/os.' : '<span style="color:#999;">–</span>') . "</td>";
+            echo "<td class='c'><strong>" . $z['celkem_h'] . " h</strong></td></tr>";
+        }
+        echo "</table>";
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Zatím žádné záznamy.</p>";
+    }
+    echo "</div>";
+
+    // Přihlášené nadcházející
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>📅 Přihlášené brigády</h5>";
+    if ($nadchazejici) {
+        usort($nadchazejici, fn($a, $b) => strcmp($a['datum'], $b['datum']));
+        foreach ($nadchazejici as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            $d_fmt = $d ? $d->format('d. m. Y') : esc_html($z['datum']);
+            echo "<div class='sbf-card'>";
+            echo "<div class='sbf-name'>" . esc_html($z['nazev']) . "</div>";
+            echo "<div class='sbf-meta'>📅 $d_fmt &nbsp;·&nbsp; 👥 Přihlášeno: <strong>" . $z['pocet'] . " os.</strong>";
+            if ($z['potrebujeme'] > 0) echo " <span style='color:#888;'>(" . $z['celkem'] . " / " . $z['potrebujeme'] . ")</span>";
+            echo "</div></div>";
+        }
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Rodina není přihlášena na žádnou nadcházející brigádu.</p>";
+    }
+    echo "</div>";
+
+    // Nepřihlášené
+    echo "<div class='sbf-col'>";
+    echo "<h5 class='sbf-col-title'>📌 Brigády bez přihlášení</h5>";
+    if ($neprihlasene) {
+        usort($neprihlasene, fn($a, $b) => strcmp($a['datum'], $b['datum']));
+        foreach ($neprihlasene as $z) {
+            $d = DateTime::createFromFormat('Y-m-d', $z['datum'], $tz);
+            $d_fmt = $d ? $d->format('d. m. Y') : esc_html($z['datum']);
+            $style = $z['je_plno'] ? "border-color:#e57373; background:#fff5f5;" : "";
+            echo "<div class='sbf-card-gray' style='$style'>";
+            echo "<div class='sbf-name'>" . esc_html($z['nazev']) . "</div>";
+            echo "<div class='sbf-meta'>📅 $d_fmt";
+            if ($z['potrebujeme'] > 0) echo " &nbsp;·&nbsp; Obsazenost: " . $z['celkem'] . " / " . $z['potrebujeme'];
+            if ($z['je_plno']) echo " <span style='color:#c62828; font-weight:600;'>– plno</span>";
+            echo "</div></div>";
+        }
+    } else {
+        echo "<p style='color:#777; font-style:italic; font-size:13px;'>Rodina je přihlášena na všechny nadcházející brigády.</p>";
+    }
+    echo "</div>";
+
+    echo "</div>"; // sbf-cols
+
+    return ob_get_clean();
+}
 
 // Frontend: přehled nadcházejících brigád + přihlašování rodin
 function sb_prehled_brigad_frontend() {
@@ -2313,11 +3583,22 @@ function sb_prehled_brigad_frontend() {
                     if ($pocet_osob < 1) {
                         $zprava = "<p style='color:red;'>Zadejte prosím počet osob alespoň 1.</p>";
                     } else {
-                        update_post_meta($brigada_id, $meta_key, $pocet_osob);
-                        wp_cache_delete($brigada_id, 'post_meta');
-                        sb_notify_prihlaseni($brigada_id, $rodina_id, $pocet_osob);
-                        sb_notify_spravci_zmena($brigada_id);
-                        $zprava = "<p style='color:green;'>Přihlášení proběhlo v pořádku.</p>";
+                        $potrebujeme2 = intval(get_post_meta($brigada_id, 'pozadovany_pocet', true));
+                        $celkem_uz2 = 0;
+                        foreach (get_post_meta($brigada_id) as $mk => $mv) {
+                            if (strpos($mk, 'ucastnici_') === 0 && isset($mv[0]) && $mv[0] !== '') {
+                                $celkem_uz2 += intval($mv[0]);
+                            }
+                        }
+                        if ($potrebujeme2 > 0 && $celkem_uz2 + $pocet_osob > $potrebujeme2) {
+                            $zprava = "<p style='color:red;'>Brigáda je již plná – přihlášeno $celkem_uz2 z $potrebujeme2 míst.</p>";
+                        } else {
+                            update_post_meta($brigada_id, $meta_key, $pocet_osob);
+                            wp_cache_delete($brigada_id, 'post_meta');
+                            sb_notify_prihlaseni($brigada_id, $rodina_id, $pocet_osob);
+                            sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' se přihlásila (' . $pocet_osob . ' ' . ($pocet_osob === 1 ? 'osoba' : ($pocet_osob <= 4 ? 'osoby' : 'osob')) . ').');
+                            $zprava = "<p style='color:green;'>Přihlášení proběhlo v pořádku.</p>";
+                        }
                     }
                 } else { // úprava
                     if ($pocet_osob < 0) {
@@ -2326,7 +3607,7 @@ function sb_prehled_brigad_frontend() {
                         update_post_meta($brigada_id, $meta_key, $pocet_osob);
                         wp_cache_delete($brigada_id, 'post_meta');
                         sb_notify_zmena($brigada_id, $rodina_id, $pocet_osob);
-                        sb_notify_spravci_zmena($brigada_id);
+                        sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' změnila počet účastníků na ' . $pocet_osob . '.');
                         $zprava = "<p style='color:green;'>Změna byla uložena.</p>";
                     }
                 }
@@ -2334,7 +3615,7 @@ function sb_prehled_brigad_frontend() {
                 delete_post_meta($brigada_id, $meta_key);
                 wp_cache_delete($brigada_id, 'post_meta');
                 sb_notify_odhlaseni($brigada_id, $rodina_id);
-                sb_notify_spravci_zmena($brigada_id);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($rodina_id) . ' se odhlásila.');
                 $zprava = "<p style='color:green;'>Byli jste odhlášeni z brigády.</p>";
             }
         }
@@ -2438,6 +3719,7 @@ if ($datum_valid < $dnes) {
 
                 echo "<label style='margin-right:6px;'>Upravit počet:</label>";
                 echo "<input type='number' name='pocet_osob' min='0' value='" . esc_attr($prihlaseno) . "' required style='width:60px; text-align:center;'>";
+                echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
 
                 echo "<input type='submit' name='upravit_ucast' value='💾 Uložit změnu' style='background:#0073aa; color:white; padding:5px 10px;'>";
                 echo "<input type='submit' name='odhlasit_ucast' value='❌ Nepřijdeme – odhlásit se' style='background:#d32f2f; color:white; padding:5px 10px;'>";
@@ -2507,10 +3789,11 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
             $uz_prihlaseno = $pocet;
             if ($jiz_prihlasen) {
                 sb_notify_zmena($brigada_id, $moje_rodina->ID, $pocet);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' změnila počet účastníků na ' . $pocet . '.');
             } else {
                 sb_notify_prihlaseni($brigada_id, $moje_rodina->ID, $pocet);
+                sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' se přihlásila (' . $pocet . ' ' . ($pocet === 1 ? 'osoba' : ($pocet <= 4 ? 'osoby' : 'osob')) . ').');
             }
-            sb_notify_spravci_zmena($brigada_id);
             $zprava = ''; // hlášku ukáže šedý box níže
         }
     }
@@ -2524,7 +3807,7 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
             wp_cache_delete($brigada_id, 'post_meta');
             $uz_prihlaseno = null;
             sb_notify_odhlaseni($brigada_id, $moje_rodina->ID);
-            sb_notify_spravci_zmena($brigada_id);
+            sb_notify_spravci_zmena($brigada_id, 'Rodina ' . get_the_title($moje_rodina->ID) . ' se odhlásila.');
             $zprava = "<p style='color:orange;'>Vaše rodina byla odhlášena z brigády.</p>";
         }
     }
@@ -2546,6 +3829,7 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
         echo "<input type='hidden' name='brigada_id' value='" . esc_attr($brigada_id) . "'>";
         echo "<label>Upravit počet:</label> ";
         echo "<input type='number' name='pocet_osob' min='1' value='" . esc_attr($uz_prihlaseno) . "' required>";
+        echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small>";
         echo "<input type='submit' name='prihlasit_na_brigadu' value='💾 Uložit' style='background:#0073aa; color:white; padding:5px 10px;'>";
         echo "</form>";
 
@@ -2563,7 +3847,8 @@ function sb_prihlaseni_na_brigadu($brigada_id) {
         wp_nonce_field('sb_prihlaseni_na_brigadu', '_wpnonce_sb_prihlaseni');
         echo "<input type='hidden' name='brigada_id' value='" . esc_attr($brigada_id) . "'>";
         echo "<label>Kolik vás za vaši rodinu přijde?</label><br>";
-        echo "<input type='number' name='pocet_osob' min='1' required><br><br>";
+        echo "<input type='number' name='pocet_osob' min='1' required>";
+        echo "<small style='color:#777; display:block; margin-top:2px;'>Jen osoby od 15 let.</small><br>";
         echo "<input type='submit' name='prihlasit_na_brigadu' value='💾 Zapsat se' style='background:#0073aa; color:white; padding:5px 10px;'>";
         echo "</form>";
     }
@@ -2731,13 +4016,16 @@ function sb_notify_zmena($brigada_id, $rodina_id, $pocet) {
 }
 
 // --- Notifikace správcům: změna přihlášek ---
-function sb_notify_spravci_zmena($brigada_id) {
-    $emails = sb_get_spravce_emails();
+function sb_notify_spravci_zmena($brigada_id, $zmena = '') {
+    $datum = get_post_meta($brigada_id, 'datum_brigady', true);
+    if ($datum && strtotime($datum) - time() > 7 * DAY_IN_SECONDS) return;
+    $emails = array_unique(array_merge(sb_get_spravce_emails(), ['v.appl@email.cz']));
     if (empty($emails)) return;
     $info = sb_get_brigada_info($brigada_id);
     list($prehled, $celkem) = sb_sestavit_prehled_prihlasenych($brigada_id);
     $subject = 'Změna přihlášek – ' . $info['nazev'] . ' (' . $info['datum'] . ')';
-    $body = "Právě došlo ke změně přihlášek na brigádu {$info['nazev']}.\n\n"
+    $zmena_radek = $zmena ? "🔔 Co se změnilo: {$zmena}\n\n" : '';
+    $body = $zmena_radek
         . "Aktuální stav přihlášených rodin:\n{$prehled}\n\n"
         . "Celkem přihlášeno: {$celkem} " . ($celkem === 1 ? 'osoba' : ($celkem <= 4 ? 'osoby' : 'osob')) . "\n\n"
         . "📌 Brigáda: {$info['nazev']}\n"

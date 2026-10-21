@@ -11,6 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Kontrola syntaxe PHP (před nahráním na server)
+        run: |
+          command -v php >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq php-cli; }
+          php -v | head -1
+          php -l skautske-brigady.php
+          php -l deploy-webhook.php
+
       - name: Nahrát na server přes FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -18,8 +25,12 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./
-          server-dir: /public_html/wp-content/plugins/skautske-brigady/
+          server-dir: public_html/wp-content/plugins/skautske-brigady/
           exclude: |
             **/.git*
             **/.git*/**
             .github/**
+
+      - name: Invalidovat PHP OPcache
+        run: |
+          curl -f "https://skautchlumec.cz/wp-content/plugins/skautske-brigady/deploy-webhook.php?token=${{ secrets.DEPLOY_SECRET }}" || true
