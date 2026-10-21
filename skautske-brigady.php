@@ -412,6 +412,41 @@ function sb_get_rodina($id) {
     $p = get_post(intval($id));
     return ($p && $p->post_type === 'rodina') ? $p : null;
 }
+
+// Walk-in záznamy se s rodinou párují podle názvu rodiny. Při přejmenování rodiny proto
+// přepíšeme jméno ve všech walk-in záznamech všech brigád, aby se hodiny rodině neztratily.
+// Vrací počet upravených brigád.
+function sb_prejmenovat_walkin($stary, $novy) {
+    if ($stary === '' || $novy === '' || $stary === $novy) return 0;
+    $upraveno = 0;
+    $brigady  = get_posts(['post_type' => 'brigada', 'numberposts' => -1, 'post_status' => 'any']);
+    foreach ($brigady as $b) {
+        $walkins = get_post_meta($b->ID, 'walkin_ucastnici', true);
+        if (!is_array($walkins)) continue;
+        $zmena = false;
+        foreach ($walkins as $i => $w) {
+            if (is_array($w) && isset($w['jmeno']) && $w['jmeno'] === $stary) {
+                $walkins[$i]['jmeno'] = $novy;
+                $zmena = true;
+            }
+        }
+        if ($zmena) {
+            update_post_meta($b->ID, 'walkin_ucastnici', wp_slash($walkins));
+            wp_cache_delete($b->ID, 'post_meta');
+            $upraveno++;
+        }
+    }
+    return $upraveno;
+}
+
+// Hook: kdykoli se změní název rodiny (Správa rodin i editace ve wp-adminu), převedeme walk-in záznamy.
+function sb_rodina_prejmenovana($post_id, $po, $pred) {
+    if (!$po || !$pred || $po->post_type !== 'rodina') return;
+    if ($pred->post_title !== $po->post_title) {
+        sb_prejmenovat_walkin($pred->post_title, $po->post_title);
+    }
+}
+add_action('post_updated', 'sb_rodina_prejmenovana', 10, 3);
  function sb_spravce_brigad_shortcode() {
   $current_user = wp_get_current_user();
 $roles = $current_user->roles;
@@ -2307,8 +2342,12 @@ function sb_prehled_rodin() {
                     $archiv        = array_values(sb_deti_archiv($id));
 
                     $chyba = '';
+                    $existujici_nazev = ($nazev !== '' && $nazev !== $post_rodina->post_title) ? sb_post_exists_by_title('rodina', $nazev) : 0;
+
                     if ($nazev === '') {
                         $chyba = 'Název rodiny nesmí být prázdný.';
+                    } elseif ($existujici_nazev && intval($existujici_nazev) !== $id) {
+                        $chyba = 'Rodina s tímto názvem už existuje.';
                     } elseif ($konflikt) {
                         $chyba = 'Někteří vybraní rodiče už patří do jiné rodiny.';
                     }
