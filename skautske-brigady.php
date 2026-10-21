@@ -674,7 +674,7 @@ add_shortcode('spravce_brigad', 'sb_spravce_brigad_shortcode');
 function sb_alert($text, $type = 'success') {
     $types = ['success' => 'sb-alert-success', 'error' => 'sb-alert-error', 'info' => 'sb-alert-info', 'warning' => 'sb-alert-warning'];
     $class = $types[$type] ?? 'sb-alert-info';
-    return "<div class='sb-alert {$class}'>{$text}</div>";
+    return "<div class='sb-alert {$class}'>" . esc_html($text) . "</div>";
 }
 
 // Utility: přesná kontrola, zda existuje post s daným názvem
@@ -714,6 +714,7 @@ function sb_ucastnici_dle_brigad() {
 
     echo "<div class='sb-card'>";
     echo "<form method='post' class='sb-form-row'>";
+    wp_nonce_field('zobraz_ucast', '_wpnonce_zobraz_ucast');
     echo "<div class='sb-form-group sb-fg-inline'><label>Brigáda:</label><select name='vybrana_brigada'>";
     foreach ($brigady as $b) {
         $selected = (isset($_POST['vybrana_brigada']) && intval($_POST['vybrana_brigada']) === $b->ID) ? 'selected' : '';
@@ -726,6 +727,10 @@ function sb_ucastnici_dle_brigad() {
 
     // Výpis účastníků
 if (isset($_POST['zobraz_ucast'])) {
+    if (!isset($_POST['_wpnonce_zobraz_ucast']) || !wp_verify_nonce($_POST['_wpnonce_zobraz_ucast'], 'zobraz_ucast')) {
+        echo sb_alert('Neplatný bezpečnostní token. Zkuste to prosím znovu.', 'error');
+        return ob_get_clean();
+    }
     $id = intval($_POST['vybrana_brigada']);
 
     // --- Získání informací o brigádě ---
@@ -1565,7 +1570,7 @@ function sb_vytvorit_rodinu() {
                     ]);
                     if ($id) {
                         update_post_meta($id, 'rodice_rodiny', $vybrani_rodice);
-                        $zprava = sb_alert('Rodina byla vytvořena: <strong>' . esc_html($nazev) . '</strong>.');
+                        $zprava = sb_alert('Rodina byla vytvořena: ' . $nazev . '.');
                         foreach ($vybrani_rodice as $rid) {
                             $obsazeni_rodice[$rid] = $id;
                         }
