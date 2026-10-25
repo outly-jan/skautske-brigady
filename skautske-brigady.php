@@ -3830,7 +3830,8 @@ function sb_prehled_brigad_frontend() {
         echo $zprava;
     }
 
-    // Vypiš jen budoucí / dnešní brigády
+    // Vypiš budoucí / dnešní brigády; proběhlé si odložíme do sekce Uskutečněné brigády
+    $probehle = [];
     foreach ($brigady as $b) {
         $datum_raw        = get_post_meta($b->ID, 'datum_brigady', true);
         if (!$datum_raw) {
@@ -3847,6 +3848,7 @@ $datum_valid = $datum_obj->format('Y-m-d');
 
 // filtr: zobraz jen ty, které jsou dnes nebo později
 if ($datum_valid < $dnes) {
+    $probehle[] = ['brigada' => $b, 'datum' => $datum_valid, 'datum_obj' => $datum_obj];
     continue;
 }
 
@@ -3929,6 +3931,23 @@ if ($datum_valid < $dnes) {
 }
 
         echo "</div>";
+    }
+
+    // Uskutečněné brigády – od nejnovější po nejstarší
+    if (!empty($probehle)) {
+        usort($probehle, function($a, $b) { return strcmp($b['datum'], $a['datum']); });
+        echo "<h3 style='margin:30px 0 12px;'>Uskutečněné brigády</h3>";
+        foreach ($probehle as $p) {
+            $pb    = $p['brigada'];
+            $misto = get_post_meta($pb->ID, 'misto_konani', true);
+            $delka = get_post_meta($pb->ID, 'delka_brigady', true);
+            echo "<div style='border:1px solid #e3e3e3; padding:10px 12px; margin-bottom:10px; background:#fcfcfc; color:#555;'>";
+            echo "<strong>" . esc_html($pb->post_title) . "</strong><br>";
+            echo "📅 " . esc_html($p['datum_obj']->format('d. m. Y'));
+            if ($misto) echo " &nbsp;·&nbsp; 📍 " . esc_html($misto);
+            if ($delka) echo " &nbsp;·&nbsp; ⏳ " . esc_html($delka);
+            echo "</div>";
+        }
     }
 
     echo "</div>";
