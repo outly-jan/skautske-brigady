@@ -3944,7 +3944,7 @@ if ($datum_valid < $dnes) {
     // Uskutečněné brigády – od nejnovější po nejstarší
     if (!empty($probehle)) {
         usort($probehle, function($a, $b) { return strcmp($b['datum'], $a['datum']); });
-        echo "<h3 style='margin:30px 0 12px;'>Uskutečněné brigády</h3>";
+        echo "<h3 style='margin:50px 0 12px;'>Uskutečněné brigády</h3>";
         foreach ($probehle as $p) {
             $pb    = $p['brigada'];
             $misto = get_post_meta($pb->ID, 'misto_konani', true);
