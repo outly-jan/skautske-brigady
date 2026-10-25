@@ -14,9 +14,10 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 - Revize rodin: správce zahájí/ukončí revizi, během níž mohou rodiny upravovat i vedoucí (role `author`)
 - Nastavení ročních požadavků na hodiny dle počtu dětí v rodině (1, 2, 3+ děti) a hodinové sazby za nesplnění
 - **Skautský rok**: požadavky se vztahují jen na rodiny vzniklé do 31. 8. daného roku; počet dětí se snímkuje ke konci sezóny (tlačítkem nebo ručně)
+- **Převod hodin nových rodin**: hodiny odpracované v roce vzniku rodiny (po 31. 8.) se převedou do prvního roku s požadavky
 - Evidence skutečně odpracovaných hodin (registrovaní i neregistrovaní walk-in účastníci)
-- Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku
-- Export do CSV (roční přehled, účastníci konkrétní brigády, prezenční listina)
+- Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku a číslováním řádků
+- Export do CSV (roční přehled vč. sloupce s převodem hodin, účastníci konkrétní brigády, prezenční listina)
 - Admin přehled brigád dle rodiny (read-only)
 - 24hodinové upomínky správcům před nadcházející brigádou (WP-Cron)
 
@@ -26,13 +27,30 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 - Změna nebo zrušení přihlášky
 - Průběžný přehled odpracovaných hodin vůči ročnímu požadavku, zbývajícím hodinám a případnému poplatku
 - E-mailové potvrzení při každé změně přihlášky
-- Rodiny vzniklé po 31. 8. aktuálního roku vidí nulový požadavek s vysvětlením, do které sezóny patří
+- Rodiny vzniklé po 31. 8. aktuálního roku vidí nulový požadavek s vysvětlením, do které sezóny patří; v přehledu příštího roku pak uvidí řádek „Převedeno z roku …" s hodinami odpracovanými ještě v roce vzniku
+- Archivovaná rodina vidí místo požadavku vysvětlení, že je od daného roku v archivu
+
+### Pro vedoucí (role `author`)
+
+- Záložka **Nápověda** s návodem krok za krokem (revize, úprava rodiny, archiv, zakládání rodiny, chybové hlášky)
+- Prohlížení rodin, přehled účastníků brigád, rodiny dle brigád a roční výpis
+- Úpravy a zakládání rodin jen během otevřené revize
 
 ## Skautský rok
 
 Skautská sezóna X probíhá od 1. 9. roku X−1 do 31. 8. roku X. Požadavky na rok X se vztahují pouze na rodiny, které vznikly (datum vytvoření WordPress příspěvku) nejpozději 31. 8. roku X.
 
-Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke konci sezóny (post meta `pocet_deti_{rok}`). Pokud snímek neexistuje, použije se aktuální počet dětí jako záložní hodnota. Snímky spravuje správce v záložce *Nastavit požadavky dle roku* — hromadně tlačítkem nebo ručně po rodinách.
+Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke konci sezóny (post meta `pocet_deti_{rok}`). Pokud snímek neexistuje, použije se aktuální stav (aktivní děti + děti archivované až od pozdějšího roku). Snímky spravuje správce v záložce *Nastavit požadavky dle roku* — hromadně tlačítkem nebo ručně po rodinách.
+
+### Převod hodin nových rodin
+
+Rodina vzniklá po 31. 8. roku X nemá na rok X požadavky. Hodiny, které v roce X přesto odpracuje (registrace i walk-in), se jí převedou jako **počáteční stav do roku X+1**:
+
+- *Moje brigády* a *Rodiny dle brigád*: v boxu roku X+1 řádek „Převedeno z roku X: N h — odpracováno v roce X, kdy rodina ještě brigády plnit nemusela"; převedené hodiny snižují zbývající hodiny i poplatek.
+- *Roční výpis* X+1: odpracováno včetně převodu (s poznámkou „vč. N h z X") a položka „Převod z roku X" v seznamu brigád; statistika člověkohodin brigád převod nezapočítává.
+- *CSV export*: převod je součástí odpracovaných hodin, navíc sloupec „Z toho převod z předchozího roku (h)".
+
+Převod se týká jen nových rodin (stávající ani archivované rodiny nic nepřevádějí). Počítá se vždy z aktuálních záznamů brigád, nic se neukládá.
 
 ## Revize rodin a archiv
 
@@ -42,7 +60,7 @@ Počet dětí rozhodný pro výpočet požadavku se ukládá jako **snímek** ke
 2. Vedoucí u dětí, které už nechodí, zaškrtnou *Už nechodí* (volitelně s poznámkou), případně přesunou celou rodinu do archivu, upraví oddíly a přidají nové děti.
 3. Správce revizi **ukončí** (nejpozději do konce listopadu — v prosinci rodiče vidí požadavky na příští rok). Vytvoří se snímek počtu dětí pro příští rok pouze z aktivních dětí a vedoucí už rodiny upravovat nemohou.
 
-Mimo revizi mohou rodiny upravovat jen správce. Trvalé smazání dítěte nebo rodiny je vyhrazeno správcům.
+Mimo revizi mohou rodiny upravovat jen správce. Trvalé smazání dítěte nebo rodiny je vyhrazeno správcům. Pokud správce po ukončení revize změní počet dětí (označí dítě „Už nechodí", obnoví ho nebo odebere), existující snímek příštího roku se automaticky upraví o rozdíl — ruční úpravy snímku zůstanou zachovány.
 
 Přejmenování rodiny automaticky převede i záznamy „walk-in" účastníků (párují se podle názvu rodiny), takže se rodině hodiny neztratí. Název nelze změnit na název jiné rodiny.
 
@@ -83,7 +101,7 @@ Plugin respektuje tyto role:
 
 ```
 skautske-brigady/
-├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~4 100 řádků)
+├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~4 300 řádků)
 └── deploy-webhook.php     # webhook pro invalidaci PHP OPcache po nasazení
 ```
 

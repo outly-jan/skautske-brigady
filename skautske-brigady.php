@@ -777,7 +777,8 @@ if (array_intersect($roles, $allowed_limited)) {
                 <h5>🧮 <b>Účastníci dle brigád</b></h5>
                 <ul>
                     <li>Vyber brigádu</li>
-                    <li>Zobrazí se seznam účastníků</li>
+                    <li>Zobrazí se seznam účastníků (přihlášené rodiny i walk-in) s odpracovanými hodinami</li>
+                    <li>Odtud stáhneš prezenční listinu, Excel (CSV) a zkopíruješ e-maily přihlášených rodin</li>
                 </ul>
 
                 <br><br>
@@ -790,18 +791,19 @@ if (array_intersect($roles, $allowed_limited)) {
                 <br><br>
                 <h5>➕ <b>Vytvořit rodinu</b></h5>
                 <ul>
-                    <li>Zadej název rodiny a počet dětí</li>
-                    <li>Vyber rodiče (uživatelé s rolí „rodic")</li>
-                    <li>Plugin kontroluje, zda rodiče nejsou už přiřazeni jinde</li>
+                    <li>Zadej název rodiny (musí být jedinečný) a vyber rodiče (uživatelé s rolí „rodic", řazení podle příjmení)</li>
+                    <li>Rodiče, kteří už patří do jiné rodiny, se v nabídce nezobrazují; chybějícího rodiče lze doplnit později</li>
+                    <li>Děti se přidávají až potom v sekci <strong>Správa rodin</strong> (Upravit)</li>
+                    <li>Vedoucí (role author) mohou rodiny zakládat jen při otevřené revizi</li>
                 </ul>
-                <p>Rodiče jsou řazeni podle příjmení pro přehlednost.</p>
 
                 <br><br>
                 <h5>👥 <b>Správa rodin</b></h5>
                 <ul>
                     <li>Přehled karet: rodina, rodiče, děti a jejich oddíl (děti, které už nechodí, jsou šedě přeškrtnuté)</li>
                     <li>Vyhledávání rodiny, rodiče nebo dítěte v poli nahoře</li>
-                    <li>Tlačítkem <strong>Upravit</strong> se karta rozbalí: změna názvu, rodičů, jmen a oddílů dětí, přidání dítěte</li>
+                    <li>Tlačítkem <strong>Upravit</strong> se karta rozbalí: změna názvu, rodičů, jmen a oddílů dětí, přidání dítěte; po uložení se karta sbalí a krátce zeleně zvýrazní</li>
+                    <li>Při přejmenování rodiny se automaticky převedou i její walk-in záznamy, takže hodiny se neztratí; název nesmí být stejný jako u jiné rodiny</li>
                     <li><strong>Už nechodí</strong> – dítě se přesune do archivu (data se nemažou) a od příštího roku se nepočítá do požadavků; poznámka je volitelná</li>
                     <li><strong>Přesunout rodinu do archivu</strong> – celá rodina už skauta nenavštěvuje; v sekci Archiv rodin ji lze kdykoli obnovit</li>
                     <li>Vedoucí (role author) mohou rodiny upravovat jen při <strong>otevřené revizi</strong>, jinak je vidí jen pro čtení</li>
@@ -812,7 +814,8 @@ if (array_intersect($roles, $allowed_limited)) {
                 <h5>🗂️ <b>Revize rodin</b></h5>
                 <ul>
                     <li>V sekci <em>Nastavit požadavky dle roku</em> správce <strong>zahájí revizi</strong> (zmrazí se počty dětí pro letošní rok a vedoucí mohou upravovat rodiny)</li>
-                    <li>Po dokončení úprav revizi <strong>ukončí</strong> – vytvoří se snímek počtu dětí pro příští rok</li>
+                    <li>Po dokončení úprav revizi <strong>ukončí</strong> – vytvoří se snímek počtu dětí pro příští rok (přepíše i ručně upravené hodnoty snímku)</li>
+                    <li>Když správce po ukončení revize u dítěte zaškrtne „Už nechodí" (nebo dítě obnoví či odebere), snímek příštího roku se automaticky upraví o rozdíl</li>
                     <li>Doporučený termín: zahájit v říjnu, ukončit nejpozději do konce listopadu (v prosinci rodiče vidí požadavky na příští rok)</li>
                 </ul>
 
@@ -824,7 +827,16 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li>Zadej sazbu za neodpracovanou hodinu (v Kč)</li>
                     <li>Ulož požadavky</li>
                 </ul>
-                <p>Na konci stránky se zobrazuje přehledová tabulka všech nastavených let, včetně sazby.</p>
+                <p>Na konci stránky se zobrazuje přehledová tabulka všech nastavených let, včetně sazby, a tabulka <strong>snímku počtu dětí</strong> pro vybraný rok (lze vytvořit tlačítkem ze současného stavu nebo upravit ručně).</p>
+
+                <br><br>
+                <h5>🗓️ <b>Skautský rok a nové rodiny</b></h5>
+                <ul>
+                    <li>Požadavky na rok X se vztahují jen na rodiny vzniklé nejpozději <strong>31. 8. roku X</strong></li>
+                    <li>Rodina vzniklá později (např. v říjnu 2026) má na rok 2026 nulový požadavek a začíná plnit až od roku 2027</li>
+                    <li><strong>Převod hodin:</strong> hodiny, které taková nová rodina odpracuje v roce svého vzniku, se jí převedou do prvního roku s požadavky (zobrazí se jako „Převedeno z roku 2026" v Moje brigády, Rodiny dle brigád i v Ročním výpisu)</li>
+                    <li>Archivovaná rodina se od roku archivace do požadavků nepočítá</li>
+                </ul>
 
                 <br><br>
                 <h5>📊 <b>Roční výpis</b></h5>
@@ -839,6 +851,9 @@ if (array_intersect($roles, $allowed_limited)) {
                             <li>Poplatkem za neodpracované hodiny (v Kč)</li>
                         </ul>
                     </li>
+                    <li>Kliknutím na záhlaví sloupců Odpracováno, Požadavek, Rozdíl a Poplatek tabulku seřadíš; sloupec # čísluje řádky</li>
+                    <li>U nových rodin obsahuje Odpracováno i převod z předchozího roku (např. „vč. 8 h z 2026")</li>
+                    <li>Tlačítkem <strong>Exportovat CSV</strong> stáhneš výpis do Excelu</li>
                 </ul>
                 <p>Výpis pomáhá sledovat, kdo splnil požadavek a jaký poplatek případně vzniká.</p>
             </div>
@@ -1764,7 +1779,7 @@ function sb_napoveda_vedouci() {
             <li>Klikněte na <strong>➕ Vytvořit rodinu</strong>.</li>
             <li><strong>Děti přidáte potom</strong> v záložce <em>Správa rodin</em>: najděte novou rodinu, klikněte na Upravit a vyplňte děti.</li>
         </ol>
-        <p>Nová rodina založená v průběhu sezóny bude mít brigádnický požadavek až od příštího roku.</p>
+        <p>Nová rodina založená v průběhu sezóny (po 31. 8.) bude mít brigádnický požadavek až od příštího roku. Hodiny, které na brigádách odpracuje ještě letos, se jí do příštího roku <strong>převedou</strong> – nic nepropadne. Rodiče to uvidí ve svém přehledu jako „Převedeno z roku …".</p>
     </div>
 
     <div class="sb-card">
