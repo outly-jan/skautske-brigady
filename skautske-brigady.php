@@ -1292,7 +1292,7 @@ if (isset($_POST['nova_brigada'])) {
         echo "<div class='sb-form-group'><label>Čas konání:</label>";
         echo "<span class='sb-form-inline'><input type='text' name='cas_brigady' value='$cas' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='cas_predbezne' $cas_predbezne> předběžně</label></span></div>";
         echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='misto_konani' value='$misto'></div>";
-        echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='delka_brigady' value='$delka'></div>";
+        echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='delka_brigady' value='$delka' placeholder='např. 4 hod.'><div class='sb-text-hint' style='margin-top:3px;'>Napište počet hodin i s jednotkou, např. <em>4 hod.</em> Text se rodičům zobrazí přesně tak, jak ho napíšete. Pro statistiku se použije první číslo v textu, proto nezačínejte časem (např. „8:30–12:30“).</div></div>";
         echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='pozadovany_pocet' value='$pozadovany_pocet' min='1' style='width:90px;'></div>";
         echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='vhodne_pro' value='$vhodne'></div>";
         echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='poznamka_brigady' rows='3'>$poznamka</textarea></div>";
@@ -1339,7 +1339,7 @@ if (isset($_POST['nova_brigada'])) {
     echo "<div class='sb-form-group'><label>Čas konání:</label>";
     echo "<span class='sb-form-inline'><input type='text' name='novy_cas_brigady' value='" . esc_attr($d['cas']) . "' style='width:120px;'> <label style='font-weight:normal;'><input type='checkbox' name='novy_cas_predbezne'> předběžně</label></span></div>";
     echo "<div class='sb-form-group'><label>Místo konání:</label><input type='text' name='novy_misto_konani' value='" . esc_attr($d['misto']) . "'></div>";
-    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady' value='" . esc_attr($d['delka']) . "'></div>";
+    echo "<div class='sb-form-group'><label>Délka brigády:</label><input type='text' name='novy_delka_brigady' value='" . esc_attr($d['delka']) . "' placeholder='např. 4 hod.'><div class='sb-text-hint' style='margin-top:3px;'>Napište počet hodin i s jednotkou, např. <em>4 hod.</em> Text se rodičům zobrazí přesně tak, jak ho napíšete. Pro statistiku se použije první číslo v textu, proto nezačínejte časem (např. „8:30–12:30“).</div></div>";
     echo "<div class='sb-form-group'><label>Potřebný počet brigádníků:</label><input type='number' name='novy_pozadovany_pocet' value='" . esc_attr($d['pocet']) . "' min='1' style='width:90px;'></div>";
     echo "<div class='sb-form-group'><label>Vhodné pro:</label><input type='text' name='novy_vhodne_pro' value='" . esc_attr($d['vhodne']) . "'></div>";
     echo "<div class='sb-form-group'><label>Poznámka:</label><textarea name='novy_poznamka_brigady' rows='3'>" . esc_textarea($d['poznamka']) . "</textarea></div>";
