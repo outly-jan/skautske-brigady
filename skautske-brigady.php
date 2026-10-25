@@ -44,7 +44,7 @@ function sb_export_rocni_vypis_csv() {
     $output = fopen('php://output', 'w');
     // BOM pro správné zobrazení UTF-8 v Excelu
     fwrite($output, "\xEF\xBB\xBF");
-    fputcsv($output, ['Rodina', 'Děti', 'Počet dětí', 'Odpracováno (h)', 'Požadavek (h)', 'Rozdíl (h)', 'Poplatek (Kč)'], ';');
+    fputcsv($output, ['Rodina', 'Děti', 'Počet dětí', 'Odpracováno (h)', 'Požadavek (h)', 'Rozdíl (h)', 'Poplatek (Kč)', 'Z toho převod z předchozího roku (h)'], ';');
 
     foreach ($rodiny as $r) {
         if (!sb_rodina_v_roce($r, $rok)) continue;
@@ -79,6 +79,8 @@ function sb_export_rocni_vypis_csv() {
                 }
             }
         }
+        $prevod       = sb_prevod_hodin($r, $rok);
+        $odpracovano += $prevod;
 
         $rozdil   = $odpracovano - $pozadavek;
         $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
@@ -102,7 +104,8 @@ function sb_export_rocni_vypis_csv() {
             $odpracovano,
             $pozadavek,
             $rozdil,
-            number_format($poplatek, 2, ',', ' ')
+            number_format($poplatek, 2, ',', ' '),
+            $prevod
         ], ';');
     }
 
@@ -365,7 +368,48 @@ function sb_poznamka_mimo_rok($rodina, $rok) {
     if ($archiv && intval($archiv['od_roku']) <= $rok) {
         return 'Rodina je od roku ' . intval($archiv['od_roku']) . ' vedena v archivu (děti už skauta nenavštěvují). Požadavky se pro ni od tohoto roku nepočítají.';
     }
-    return 'Rodina vznikla po 31. 8. ' . $rok . ' — patří do sezóny ' . $rok . '/' . ($rok + 1) . '. Požadavky platí od roku ' . ($rok + 1) . '.';
+    return 'Rodina vznikla po 31. 8. ' . $rok . ' — patří do sezóny ' . $rok . '/' . ($rok + 1) . '. Požadavky platí od roku ' . ($rok + 1) . ' a hodiny odpracované v roce ' . $rok . ' se do něj převedou.';
+}
+
+// Odpracované hodiny rodiny na brigádách konaných v roce $rok (stejný výpočet jako Roční výpis, vč. walk-in).
+function sb_odpracovano_v_roce($rodina, $rok) {
+    $celkem  = 0;
+    $brigady = get_posts(['post_type' => 'brigada', 'numberposts' => -1]);
+    foreach ($brigady as $b) {
+        $datum_raw = get_post_meta($b->ID, 'datum_brigady', true);
+        if (!$datum_raw || !preg_match('/\b(19|20)\d{2}\b/', $datum_raw, $m) || intval($m[0]) !== intval($rok)) continue;
+        $h = sb_celkem_hodin($b->ID, $rodina->ID);
+        if ($h !== null) {
+            $celkem += $h;
+            continue;
+        }
+        $walkins = get_post_meta($b->ID, 'walkin_ucastnici', true);
+        if (is_array($walkins)) {
+            foreach ($walkins as $w) {
+                if (is_array($w) && ($w['jmeno'] ?? '') === $rodina->post_title) {
+                    $celkem += max(1, intval($w['pocet'] ?? 1)) * intval($w['hodiny'] ?? 0);
+                    break;
+                }
+            }
+        }
+    }
+    return $celkem;
+}
+
+// Převod hodin pro novou rodinu: rodina, která do roku $rok-1 nepatřila (vznikla po 31. 8.),
+// ale do roku $rok ano, dostane do roku $rok hodiny odpracované v roce $rok-1.
+function sb_prevod_hodin($rodina, $rok) {
+    $rok = intval($rok);
+    if (sb_rodina_v_roce($rodina, $rok - 1) || !sb_rodina_v_roce($rodina, $rok)) return 0;
+    return sb_odpracovano_v_roce($rodina, $rok - 1);
+}
+
+// Řádek s převodem hodin do tabulky požadavků (Moje brigády, Rodiny dle brigád).
+function sb_prevod_radek_html($prevod, $rok) {
+    if ($prevod <= 0) return '';
+    $z = intval($rok) - 1;
+    return "<tr><td style='padding-right:16px; color:#555;'>Převedeno z roku $z:</td><td><strong>" . intval($prevod) . " h</strong></td></tr>"
+         . "<tr><td colspan='2' style='font-size:11px; color:#777;'>Odpracováno v roce $z, kdy rodina ještě brigády plnit nemusela.</td></tr>";
 }
 
 // Stav revize rodin: ['otevrena' => bool, 'rok' => cílový rok revize].
@@ -2178,15 +2222,21 @@ function sb_rocni_vypis() {
                 }
             }
 
+            $prevod = sb_prevod_hodin($r, $vybrany_rok);
+            if ($prevod > 0) {
+                $odpracovano += $prevod;
+                array_unshift($brigady_seznam, 'Převod z roku ' . ($vybrany_rok - 1) . ' (' . $prevod . ' h)');
+            }
+
             $rozdil  = $odpracovano - $pozadavek;
             $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
             $celkem_poplatek += $poplatek;
-            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id');
+            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'prevod', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id');
         }
 
         // --- Agregované statistiky brigád ---
         $minule_clovekoh   = 0;
-        foreach ($radky as $z) $minule_clovekoh += $z['odpracovano'];
+        foreach ($radky as $z) $minule_clovekoh += $z['odpracovano'] - $z['prevod'];
 
         $dnes_stat         = new DateTime('today', wp_timezone());
         $minule_brigady_h  = 0;
@@ -2287,7 +2337,7 @@ function sb_rocni_vypis() {
                 <td class='sb-small'>" . $z['jmena_deti'] . "</td>
                 <td class='sb-small'>" . $z['jmena_rodicu'] . "</td>
                 <td class='center'>" . $z['pocet_deti'] . "</td>
-                <td class='center' data-v='" . intval($z['odpracovano']) . "'>" . $z['odpracovano'] . "</td>
+                <td class='center' data-v='" . intval($z['odpracovano']) . "'>" . $z['odpracovano'] . ($z['prevod'] > 0 ? "<br><small style='color:#777;'>vč. " . intval($z['prevod']) . " h z " . ($vybrany_rok - 1) . "</small>" : "") . "</td>
                 <td class='center' data-v='" . intval($z['pozadavek']) . "'>" . $z['pozadavek'] . "</td>
                 <td class='center $trida_rozdil' data-v='" . intval($z['rozdil']) . "'>" . intval($z['rozdil']) . "</td>
                 <td class='center' data-v='" . $z['poplatek'] . "'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
@@ -3144,7 +3194,9 @@ function sb_moje_brigady_shortcode() {
         }
     }
 
-    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni);
+    $prevod_aktivni = sb_prevod_hodin($rodina_obj, $rok_aktivni);
+    $prevod_druhy   = $rok_druhy ? sb_prevod_hodin($rodina_obj, $rok_druhy) : 0;
+    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni - $prevod_aktivni);
     $barva    = ($zbyva === 0) ? '#2e7d32' : '#d32f2f';
     $poplatek = $zbyva * $sazba;
 
@@ -3165,7 +3217,7 @@ function sb_moje_brigady_shortcode() {
             $pozadavek_druhy = intval($pozadavky_druhy['3']);
         }
         $sazba_druhy    = isset($pozadavky_druhy['sazba']) ? floatval($pozadavky_druhy['sazba']) : 0;
-        $zbyva_druhy    = max(0, $pozadavek_druhy - $odpracovano_druhy);
+        $zbyva_druhy    = max(0, $pozadavek_druhy - $odpracovano_druhy - $prevod_druhy);
         $poplatek_druhy = $zbyva_druhy * $sazba_druhy;
     }
 
@@ -3227,6 +3279,7 @@ function sb_moje_brigady_shortcode() {
     }
     echo "<table class='sbf-req-table'>";
     echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
+    echo sb_prevod_radek_html($prevod_aktivni, $rok_aktivni);
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zbyva) . ";'>$zbyva h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
@@ -3242,6 +3295,7 @@ function sb_moje_brigady_shortcode() {
         }
         echo "<table class='sbf-req-table'>";
         echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
+        echo sb_prevod_radek_html($prevod_druhy, $rok_druhy);
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zbyva_d) . ";'>$zbyva_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
@@ -3528,7 +3582,9 @@ function sb_rodiny_dle_brigad_tab() {
         }
     }
 
-    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni);
+    $prevod_aktivni = sb_prevod_hodin($vybrana_rodina_obj, $rok_aktivni);
+    $prevod_druhy   = $rok_druhy ? sb_prevod_hodin($vybrana_rodina_obj, $rok_druhy) : 0;
+    $zbyva    = max(0, $pozadavek - $odpracovano_aktivni - $prevod_aktivni);
     $poplatek = $zbyva * $sazba;
 
     $pozadavky_druhy = ($rok_druhy && isset($pozadavky_vse[$rok_druhy])) ? $pozadavky_vse[$rok_druhy] : null;
@@ -3536,7 +3592,7 @@ function sb_rodiny_dle_brigad_tab() {
     if ($rok_druhy && $pozadavky_druhy && $v_druhem_roce) {
         $pozadavek_druhy = intval($pozadavky_druhy[min(sb_pocet_deti_pro_rok($vybrana_rodina_id, $rok_druhy), 3)] ?? 0);
         $sazba_druhy     = floatval($pozadavky_druhy['sazba'] ?? 0);
-        $zbyva_druhy     = max(0, $pozadavek_druhy - $odpracovano_druhy);
+        $zbyva_druhy     = max(0, $pozadavek_druhy - $odpracovano_druhy - $prevod_druhy);
         $poplatek_druhy  = $zbyva_druhy * $sazba_druhy;
     }
 
@@ -3559,6 +3615,7 @@ function sb_rodiny_dle_brigad_tab() {
     }
     echo "<table class='sbf-req-table'>";
     echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek h</strong></td></tr>";
+    echo sb_prevod_radek_html($prevod_aktivni, $rok_aktivni);
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_z) . ";'>$zbyva h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
@@ -3574,6 +3631,7 @@ function sb_rodiny_dle_brigad_tab() {
         }
         echo "<table class='sbf-req-table'>";
         echo "<tr><td style='padding-right:16px; color:#555;'>Požadavek:</td><td><strong>$pozadavek_druhy h</strong></td></tr>";
+        echo sb_prevod_radek_html($prevod_druhy, $rok_druhy);
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zd) . ";'>$zbyva_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
