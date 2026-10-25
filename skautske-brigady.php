@@ -3831,7 +3831,9 @@ function sb_prehled_brigad_frontend() {
     }
 
     // Vypiš budoucí / dnešní brigády; proběhlé si odložíme do sekce Uskutečněné brigády
+    echo "<h3 style='margin:0 0 12px;'>Budoucí brigády</h3>";
     $probehle = [];
+    $budoucich = 0;
     foreach ($brigady as $b) {
         $datum_raw        = get_post_meta($b->ID, 'datum_brigady', true);
         if (!$datum_raw) {
@@ -3851,6 +3853,8 @@ if ($datum_valid < $dnes) {
     $probehle[] = ['brigada' => $b, 'datum' => $datum_valid, 'datum_obj' => $datum_obj];
     continue;
 }
+
+        $budoucich++;
 
         // Další pole brigády
         $cas             = get_post_meta($b->ID, 'cas_brigady', true);
@@ -3931,6 +3935,10 @@ if ($datum_valid < $dnes) {
 }
 
         echo "</div>";
+    }
+
+    if ($budoucich === 0) {
+        echo "<p style='font-style:italic; color:#666;'>Momentálně nejsou vypsané žádné brigády. Jakmile nějakou vypíšeme, dáme vám vědět.</p>";
     }
 
     // Uskutečněné brigády – od nejnovější po nejstarší
