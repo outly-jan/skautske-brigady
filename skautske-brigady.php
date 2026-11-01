@@ -805,7 +805,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li>Tlačítkem <strong>Upravit</strong> se karta rozbalí: změna názvu, rodičů, jmen a oddílů dětí, přidání dítěte; po uložení se karta sbalí a krátce zeleně zvýrazní</li>
                     <li>Při přejmenování rodiny se automaticky převedou i její walk-in záznamy, takže hodiny se neztratí; název nesmí být stejný jako u jiné rodiny</li>
                     <li><strong>Už nechodí</strong> – dítě se přesune do archivu (data se nemažou) a od příštího roku se nepočítá do požadavků; poznámka je volitelná</li>
-                    <li><strong>Přesunout rodinu do archivu</strong> – celá rodina už skauta nenavštěvuje; v sekci Archiv rodin ji lze kdykoli obnovit</li>
+                    <li><strong>Přesunout rodinu do archivu</strong> – celá rodina už skauta nenavštěvuje; v sekci Archiv rodin ji lze kdykoli obnovit. Rodiče v archivované rodině zůstávají, nenabízejí se pro jiné rodiny a při obnovení se vrátí s ní</li>
                     <li>Vedoucí (role author) mohou rodiny upravovat jen při <strong>otevřené revizi</strong>, jinak je vidí jen pro čtení</li>
                     <li>Trvalé smazání dítěte nebo rodiny může provést jen správce</li>
                 </ul>
@@ -1767,7 +1767,7 @@ function sb_napoveda_vedouci() {
             <li>Rozbalte kartu rodiny (<strong>✏️ Upravit</strong>).</li>
             <li>Úplně dole můžete vyplnit poznámku a kliknout na <strong>📦 Přesunout rodinu do archivu</strong>.</li>
         </ol>
-        <p>Rodina pak zmizí z přehledu a najdete ji dole na stránce v sekci <strong>📦 Archiv rodin</strong>. Tam ji lze tlačítkem <strong>↩️ Obnovit z archivu</strong> vrátit zpět.</p>
+        <p>Rodina pak zmizí z přehledu a najdete ji dole na stránce v sekci <strong>📦 Archiv rodin</strong>. Tam ji lze tlačítkem <strong>↩️ Obnovit z archivu</strong> vrátit zpět. Rodiče zůstávají v archivované rodině – proto je neuvidíte v nabídce rodičů u jiných rodin.</p>
         <p>Smazat rodinu nebo dítě natrvalo může jen správce.</p>
     </div>
 
@@ -1837,7 +1837,7 @@ function sb_vytvorit_rodinu() {
     // Zjištění, kteří rodiče už jsou přiřazeni
     $obsazeni_rodice = [];
     foreach ($rodiny as $r) {
-        if (sb_rodina_archiv($r->ID)) continue; // rodiče archivovaných rodin jsou volní
+        // I rodiče archivovaných rodin zůstávají v rodině (obsazení); vrátí se s ní při obnovení
         $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
         if (is_array($prirazeni)) {
             foreach ($prirazeni as $rid) {
@@ -2433,11 +2433,10 @@ function sb_prehled_rodin() {
         ]);
     };
 
-    // Rodiče už přiřazení k (neaktivní = nearchivované) rodině: [user_id => rodina_id]
+    // Rodiče už přiřazení k rodině (i archivované): [user_id => rodina_id]
     $spocitej_obsazeni = function($rodiny) {
         $obsazeni = [];
         foreach ($rodiny as $r) {
-            if (sb_rodina_archiv($r->ID)) continue;
             $prirazeni = get_post_meta($r->ID, 'rodice_rodiny', true);
             if (is_array($prirazeni)) {
                 foreach ($prirazeni as $rid) {

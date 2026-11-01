@@ -60,6 +60,8 @@ Převod se týká jen nových rodin (stávající ani archivované rodiny nic ne
 2. Vedoucí u dětí, které už nechodí, zaškrtnou *Už nechodí* (volitelně s poznámkou), případně přesunou celou rodinu do archivu, upraví oddíly a přidají nové děti.
 3. Správce revizi **ukončí** (nejpozději do konce listopadu — v prosinci rodiče vidí požadavky na příští rok). Vytvoří se snímek počtu dětí pro příští rok pouze z aktivních dětí a vedoucí už rodiny upravovat nemohou.
 
+Rodiče archivované rodiny v ní zůstávají (`rodice_rodiny` se nemění), nenabízejí se k přiřazení do jiných rodin a při obnovení rodiny se vrátí s ní.
+
 Mimo revizi mohou rodiny upravovat jen správce. Trvalé smazání dítěte nebo rodiny je vyhrazeno správcům. Pokud správce po ukončení revize změní počet dětí (označí dítě „Už nechodí", obnoví ho nebo odebere), existující snímek příštího roku se automaticky upraví o rozdíl — ruční úpravy snímku zůstanou zachovány.
 
 Přejmenování rodiny automaticky převede i záznamy „walk-in" účastníků (párují se podle názvu rodiny), takže se rodině hodiny neztratí. Název nelze změnit na název jiné rodiny.
