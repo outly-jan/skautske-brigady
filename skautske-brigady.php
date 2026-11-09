@@ -1126,6 +1126,12 @@ function sb_platby_tab() {
                     $c = sb_castka($c);
                     if ($c > 0) $nove[] = $c;
                 }
+                if (!empty($_POST['uhrazeno'][$id])) {
+                    // „uhrazeno" / „doplaceno": zapíše se celá zbývající částka
+                    $info = sb_prispevek_rodiny($r, $rok);
+                    $zbytek = $info ? sb_castka($info['celkem'] - array_sum($nove)) : 0;
+                    if ($zbytek > 0) $nove[] = $zbytek;
+                }
                 if ($nove !== sb_platby($id, $rok)) {
                     $zmen++;
                     if ($nove) update_post_meta($id, 'sb_platby_' . $rok, $nove);
@@ -1282,7 +1288,10 @@ function sb_platby_tab() {
                 echo "<input type='number' name='platby[$id][]' value='" . esc_attr($c) . "' min='0' step='0.01' style='width:80px;'>";
             }
             if ($i['stav'] !== 'zaplaceno') {
-                echo "<input type='number' name='platby[$id][]' value='' min='0' step='0.01' placeholder='" . ($i['platby'] ? 'další' : 'částka') . "' style='width:80px;'>";
+                $splatky = !empty($i['platby']);
+                echo "<label style='font-size:13px; white-space:nowrap;'><input type='checkbox' name='uhrazeno[$id]' value='1' class='sb-pl-cele'> " . ($splatky ? 'doplaceno' : 'uhrazeno') . "</label>";
+                echo "<label style='font-size:13px; white-space:nowrap;'><input type='checkbox' class='sb-pl-cast'> " . ($splatky ? 'další splátka' : 'částečně uhrazeno') . "</label>";
+                echo "<input type='number' name='platby[$id][]' value='' min='0' step='0.01' placeholder='částka' class='sb-pl-pole' style='width:90px; display:none;'>";
             }
             echo "</div>";
         } else {
@@ -1296,7 +1305,7 @@ function sb_platby_tab() {
     if (!$seznam) echo "<tr><td colspan='8' class='center sb-text-muted'>Žádná rodina zatím neplatí.</td></tr>";
     echo "</tbody></table></div>";
     if ($je_spravce) {
-        echo "<p class='sb-text-hint'>Zapište přijatou částku a uložte. Jakmile součet plateb dosáhne celkové částky (nebo ji přesáhne), je rodina zaplacená; u splátek se po uložení objeví další pole. Chybnou platbu opravíte přepsáním nebo smazáním čísla.</p>";
+        echo "<p class='sb-text-hint'>Zaškrtněte „uhrazeno“ (zapíše se celá částka), nebo „částečně uhrazeno“ a vyplňte přijatou částku; pak uložte. U splátek zaškrtněte „doplaceno“ nebo „další splátka“. Zapsané platby opravíte přepsáním nebo smazáním čísla.</p>";
         echo "<div class='sb-btn-row'><input type='submit' name='sb_platby_ulozit' value='💾 Uložit platby' class='sb-btn sb-btn-primary'></div>";
         echo "</form>";
     } else {
@@ -1348,6 +1357,17 @@ function sb_platby_tab() {
     }
 
     echo "<script>
+document.addEventListener('change', function(e) {
+    var cb = e.target;
+    if (!cb.classList || (!cb.classList.contains('sb-pl-cele') && !cb.classList.contains('sb-pl-cast'))) return;
+    var bunka = cb.closest('td');
+    var cele = bunka.querySelector('.sb-pl-cele'), cast = bunka.querySelector('.sb-pl-cast'), pole = bunka.querySelector('.sb-pl-pole');
+    if (cb === cele && cele.checked) cast.checked = false;
+    if (cb === cast && cast.checked) cele.checked = false;
+    pole.style.display = cast.checked ? '' : 'none';
+    if (!cast.checked) pole.value = '';
+    if (cast.checked) pole.focus();
+});
 function sbMailVyber(co) {
     document.querySelectorAll('.sb-mail-cb').forEach(function(cb) {
         if (cb.disabled) { cb.checked = false; return; }
@@ -1723,7 +1743,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li>V <em>Nastavit požadavky dle roku</em> vyber rok (např. 2027) a v kartě <strong>Členský příspěvek</strong> vyplň částku za dítě při 1, 2 a 3+ dětech v rodině, číslo účtu a období, kdy se příspěvek rodičům zobrazí (od – do)</li>
                     <li>Příspěvek rodiny = počet dětí × částka + doplatek za neodpracované brigádní hodiny předchozího roku (jednou za rodinu). Rodiny v archivu neplatí nic</li>
                     <li>Rodiče v nastaveném období vidí v <strong>Moje brigády</strong> rozpis, platební údaje a QR kód; mohou přidat sponzorský dar (připočte se k částce i do QR kódu)</li>
-                    <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em>; přijatou částku zapiš do pole a ulož (jakmile součet dosáhne celkové částky, je zaplaceno; u splátek naskočí další pole). Vedoucí platby vidí, zapisuje jen správce</li>
+                    <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em>; přijatou částku zapiš do pole a ulož (zaškrtni „uhrazeno“, nebo „částečně uhrazeno“ a vyplň částku; u splátek „doplaceno“ / „další splátka“). Vedoucí platby vidí, zapisuje jen správce</li>
                     <li>Tamtéž <strong>rozeslání e-mailů</strong>: nejdřív si pošli zkušební e-mail, pak zaškrtni rodiny (Označit vše / Jen nezaplacené / Jen dosud neodeslané) a odešli – posílá se po 20 rodinách na kliknutí; odpovědi chodí na info@skautchlumec.cz</li>
                     <li>Rodina, jejíž rodiče ještě nemají účet na webu, e-mail dostat nemůže – po založení účtu jí ho stačí doposlat</li>
                 </ul>

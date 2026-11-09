@@ -152,13 +152,24 @@ ok(strpos(sb_prispevek_html($i, ''), 'Uhrazeno – děkujeme') !== false, 'rodin
 delete_post_meta(100, 'sb_platby_2027');
 
 $GLOBALS['roles'] = ['administrator'];
-$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100', '200'], 'platby' => ['100' => ['1000', ''], '200' => ['3500']]];
+$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100', '200'], 'platby' => ['100' => ['1000'], '200' => ['']], 'uhrazeno' => ['200' => '1']];
 $h = sb_platby_tab();
-ok(sb_platby(100, 2027) === [1000] && sb_platby(200, 2027) === [3500] && sb_prispevek_rodiny(get_post(200), 2027)['stav'] === 'zaplaceno', 'uložení: splátka 1 000 Kč; platba 3 500 Kč ≥ 3 200 Kč = automaticky zaplaceno');
+ok(sb_platby(100, 2027) === [1000] && sb_platby(200, 2027) === [3200] && sb_prispevek_rodiny(get_post(200), 2027)['stav'] === 'zaplaceno', 'uložení: částečně 1 000 Kč; „uhrazeno" zapíše celou částku 3 200 Kč');
 $_POST = ['sb_platby_rok' => '2027'];
 $h = sb_platby_tab();
 $radek = substr($h, strpos($h, "data-hledat='novákovi"), 2000);
-ok(substr_count($radek, "name='platby[100][]'") === 2 && strpos($h, "name='cele[") === false, 'u splátek naskočí další pole pro částku (bez zaškrtávátka „celé")');
+ok(substr_count($radek, "name='platby[100][]'") === 2 && strpos($radek, 'doplaceno') !== false && strpos($radek, 'další splátka') !== false, 'u splátek: zapsaná splátka + volby „doplaceno" / „další splátka"');
+$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100'], 'platby' => ['100' => ['1000', '500']]];
+sb_platby_tab();
+ok(sb_platby(100, 2027) === [1000, 500], 'další splátka se přidá k předchozí');
+$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100'], 'platby' => ['100' => ['1000', '500', '']], 'uhrazeno' => ['100' => '1']];
+sb_platby_tab();
+$i100 = sb_prispevek_rodiny(get_post(100), 2027);
+ok($i100['stav'] === 'zaplaceno' && $i100['zaplaceno'] == $i100['celkem'] && count(sb_platby(100, 2027)) === 3, '„doplaceno" zapíše zbytek a rodina je zaplacená');
+$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100'], 'platby' => ['100' => ['1000']]];
+sb_platby_tab();
+$_POST = ['sb_platby_rok' => '2027']; $h = sb_platby_tab();
+$radek = substr($h, strpos($h, "data-hledat='novákovi"), 2000);
 ok(strpos($h, 'Příspěvky za děti: <strong>') !== false && strpos($h, 'Doplatky za brigády 2026: <strong>') !== false && strpos($h, 'Celkem k úhradě') !== false, 'souhrn odděluje příspěvky, doplatky za brigády a celkovou částku');
 $radek2 = substr($h, strpos($h, "data-hledat='svobodovi"), 2000);
 ok(substr_count($radek2, "name='platby[200][]'") === 1 && strpos($radek2, 'Zaplaceno') !== false, 'u uhrazené rodiny už další pole není');
