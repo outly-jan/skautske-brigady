@@ -19,6 +19,7 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 - Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku a číslováním řádků
 - Export do CSV (roční přehled vč. sloupce s převodem hodin, účastníci konkrétní brigády, prezenční listina)
 - Admin přehled brigád dle rodiny (read-only)
+- **Členské příspěvky**: výpočet příspěvku rodiny (děti × sazba + doplatek za neodpracované brigády předchozího roku), QR platba, sponzorský dar, evidence plateb a splátek, rozesílání e-mailů
 - 24hodinové upomínky správcům před nadcházející brigádou (WP-Cron)
 
 ### Pro rodiče
@@ -32,6 +33,7 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 
 ### Pro vedoucí (role `author`)
 
+- Záložka **Platby** (jen pro čtení) – kdo zaplatil členský příspěvek, komu platbu připomenout
 - Záložka **Nápověda** s návodem krok za krokem (revize, úprava rodiny, archiv, zakládání rodiny, chybové hlášky)
 - Prohlížení rodin, přehled účastníků brigád, rodiny dle brigád a roční výpis
 - Úpravy a zakládání rodin jen během otevřené revize
@@ -51,6 +53,16 @@ Rodina vzniklá po 31. 8. roku X nemá na rok X požadavky. Hodiny, které v roc
 - *CSV export*: převod je součástí odpracovaných hodin, navíc sloupec „Z toho převod z předchozího roku (h)".
 
 Převod se týká jen nových rodin (stávající ani archivované rodiny nic nepřevádějí). Počítá se vždy z aktuálních záznamů brigád, nic se neukládá.
+
+## Členské příspěvky a platby
+
+Správce v záložce *Nastavit požadavky dle roku* u daného roku (např. 2027) vyplní částku za dítě při 1 / 2 / 3+ dětech v rodině, číslo účtu a období zobrazení (od – do). Uloženo v option `sb_prispevky`.
+
+- **Výpočet** (`sb_prispevek_rodiny`): počet dětí v roce X (snímek / stav) × sazba + doplatek za brigády roku X−1 (neodpracované hodiny × hodinová sazba, jednou za rodinu, stejně jako v Ročním výpisu) + případný dar. Rodiny archivované od roku X ani rodiny bez dětí neplatí nic; nová rodina (vznik po 31. 8. X−1) platí jen příspěvek za děti.
+- **Moje brigády**: v nastaveném období box s rozpisem, číslem účtu, částkou, zprávou pro příjemce („Poplatek 2027 jména dětí + dar N") a QR kódem. Rodina může zadat sponzorský dar (post meta `sb_dar_{rok}`), který se přičte k částce i do QR kódu. Po zaplacení vidí „Uhrazeno".
+- **QR Platba**: formát SPD (IBAN se odvodí z čísla účtu), zpráva bez diakritiky max. 60 znaků, částka = zbývající částka. QR kód se generuje přímo v pluginu (SVG na webu, PNG v e-mailu přes GD) – údaje rodin se neposílají žádné externí službě.
+- **Karta Platby**: přehled rodin se stavem nezaplaceno / splátky / zaplaceno, souhrn a export CSV. Platby (splátky) jsou v post meta `sb_platby_{rok}`. Vedoucí kartu vidí (připomínají platby rodičům), zapisuje jen správce.
+- **E-maily**: rozesílání vybraným rodinám (všem rodičům s účtem) po 20 na kliknutí, zkušební e-mail sobě, Reply-To `info@skautchlumec.cz`, datum posledního odeslání (`sb_prispevek_mail_{rok}`).
 
 ## Revize rodin a archiv
 
@@ -103,8 +115,13 @@ Plugin respektuje tyto role:
 
 ```
 skautske-brigady/
-├── skautske-brigady.php   # celý plugin (jediný PHP soubor, ~4 300 řádků)
-└── deploy-webhook.php     # webhook pro invalidaci PHP OPcache po nasazení
+├── skautske-brigady.php   # celý plugin (jediný PHP soubor)
+├── deploy-webhook.php     # webhook pro invalidaci PHP OPcache po nasazení
+└── tests/                 # automatické testy na atrapách WordPressu (na server se nenahrávají)
+    ├── test_plugin.php    # php tests/test_plugin.php
+    ├── wp_stubs.php
+    ├── qr_generuj.php     # zkušební QR kódy …
+    └── qr_over.py         # … a jejich ověření nezávislou čtečkou (pip install zxing-cpp pillow)
 ```
 
 ## Nasazení

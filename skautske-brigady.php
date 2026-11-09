@@ -1650,6 +1650,17 @@ if (array_intersect($roles, $allowed_limited)) {
                 </ul>
 
                 <br><br>
+                <h5>💳 <b>Členský příspěvek a platby</b></h5>
+                <ul>
+                    <li>V <em>Nastavit požadavky dle roku</em> vyber rok (např. 2027) a v kartě <strong>Členský příspěvek</strong> vyplň částku za dítě při 1, 2 a 3+ dětech v rodině, číslo účtu a období, kdy se příspěvek rodičům zobrazí (od – do)</li>
+                    <li>Příspěvek rodiny = počet dětí × částka + doplatek za neodpracované brigádní hodiny předchozího roku (jednou za rodinu). Rodiny v archivu neplatí nic</li>
+                    <li>Rodiče v nastaveném období vidí v <strong>Moje brigády</strong> rozpis, platební údaje a QR kód; mohou přidat sponzorský dar (připočte se k částce i do QR kódu)</li>
+                    <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em>; přijatou částku zapiš do pole a ulož (u splátek naskočí další pole, „celé“ doplní celý zbytek). Vedoucí platby vidí, zapisuje jen správce</li>
+                    <li>Tamtéž <strong>rozeslání e-mailů</strong>: nejdřív si pošli zkušební e-mail, pak zaškrtni rodiny (Označit vše / Jen nezaplacené / Jen dosud neodeslané) a odešli – posílá se po 20 rodinách na kliknutí; odpovědi chodí na info@skautchlumec.cz</li>
+                    <li>Rodina, jejíž rodiče ještě nemají účet na webu, e-mail dostat nemůže – po založení účtu jí ho stačí doposlat</li>
+                </ul>
+
+                <br><br>
                 <h5>📊 <b>Roční výpis</b></h5>
                 <ul>
                     <li>Vyber rok (2025–2035)</li>
@@ -2609,6 +2620,7 @@ function sb_napoveda_vedouci() {
         <ul>
             <li><strong>🧮 Účastníci dle brigád</strong> – vyberte brigádu a uvidíte, kdo je přihlášený a kolik hodin odpracoval. Odtud si stáhnete <strong>prezenční listinu</strong>, <strong>Excel (CSV)</strong> a zkopírujete <strong>e-maily</strong> přihlášených rodin.</li>
             <li><strong>👪 Rodiny dle brigád</strong> – vyberte rodinu a uvidíte její brigády a kolik hodin jí ještě zbývá.</li>
+            <li><strong>💳 Platby</strong> – přehled, které rodiny už zaplatily členský příspěvek (zaplaceno / splátky / nezaplaceno). Filtrem „Nezaplaceno + splátky“ rychle najdete rodiny, kterým je potřeba platbu připomenout. Platby zapisuje správce.</li>
             <li><strong>📊 Roční výpis</strong> – vyberte rok a uvidíte přehled všech rodin. Kliknutím na záhlaví sloupců <em>Odpracováno, Požadavek, Rozdíl, Poplatek</em> tabulku seřadíte. Výpis stáhnete tlačítkem <strong>📥 Exportovat CSV</strong> (otevře se v Excelu).</li>
         </ul>
     </div>
