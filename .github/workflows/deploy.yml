@@ -30,6 +30,7 @@ jobs:
             **/.git*
             **/.git*/**
             .github/**
+            tests/**
 
       - name: Invalidovat PHP OPcache
         run: |

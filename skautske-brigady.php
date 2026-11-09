@@ -503,6 +503,811 @@ function sb_rodina_prejmenovana($post_id, $po, $pred) {
     }
 }
 add_action('post_updated', 'sb_rodina_prejmenovana', 10, 3);
+// =====================================================================
+// ČLENSKÉ PŘÍSPĚVKY: výpočet, QR Platba, platby
+// =====================================================================
+
+// --- QR kód (byte mode, úroveň opravy M, verze 1–10), bez externích služeb ---
+
+function sb_qr_gf_mul($x, $y) {
+    $z = 0;
+    for ($i = 7; $i >= 0; $i--) {
+        $z = ($z << 1) ^ (($z >> 7) * 0x11D);
+        $z ^= (($y >> $i) & 1) * $x;
+    }
+    return $z & 0xFF;
+}
+
+function sb_qr_rs_divisor($degree) {
+    $result = array_fill(0, $degree, 0);
+    $result[$degree - 1] = 1;
+    $root = 1;
+    for ($i = 0; $i < $degree; $i++) {
+        for ($j = 0; $j < $degree; $j++) {
+            $result[$j] = sb_qr_gf_mul($result[$j], $root);
+            if ($j + 1 < $degree) $result[$j] ^= $result[$j + 1];
+        }
+        $root = sb_qr_gf_mul($root, 0x02);
+    }
+    return $result;
+}
+
+function sb_qr_rs_remainder($data, $divisor) {
+    $result = array_fill(0, count($divisor), 0);
+    foreach ($data as $b) {
+        $factor = $b ^ array_shift($result);
+        $result[] = 0;
+        foreach ($divisor as $i => $coef) {
+            $result[$i] ^= sb_qr_gf_mul($coef, $factor);
+        }
+    }
+    return $result;
+}
+
+// Vrátí matici modulů [y][x] (true = tmavý) nebo null, pokud je text příliš dlouhý.
+function sb_qr_matice($text) {
+    // verze => [EC kódových slov na blok, [[počet bloků, datových slov v bloku], ...]] pro úroveň M
+    $tab = [
+        1 => [10, [[1, 16]]], 2 => [16, [[1, 28]]], 3 => [26, [[1, 44]]], 4 => [18, [[2, 32]]],
+        5 => [24, [[2, 43]]], 6 => [16, [[4, 27]]], 7 => [18, [[4, 31]]], 8 => [22, [[2, 38], [2, 39]]],
+        9 => [22, [[3, 36], [2, 37]]], 10 => [26, [[4, 43], [1, 44]]],
+    ];
+    $zarovnani = [1 => [], 2 => [6, 18], 3 => [6, 22], 4 => [6, 26], 5 => [6, 30], 6 => [6, 34],
+                  7 => [6, 22, 38], 8 => [6, 24, 42], 9 => [6, 26, 46], 10 => [6, 28, 50]];
+    $bytes = array_values(unpack('C*', (string) $text) ?: []);
+    $n = count($bytes);
+
+    $verze = 0;
+    foreach ($tab as $v => $t) {
+        $datovych = 0;
+        foreach ($t[1] as $g) $datovych += $g[0] * $g[1];
+        $delka_poctu = $v <= 9 ? 8 : 16;
+        if (4 + $delka_poctu + 8 * $n <= $datovych * 8) { $verze = $v; break; }
+    }
+    if (!$verze) return null;
+
+    list($ec_len, $skupiny) = $tab[$verze];
+    $datovych = 0;
+    foreach ($skupiny as $g) $datovych += $g[0] * $g[1];
+
+    // Bitový proud
+    $bity = [];
+    $pridej = function($hodnota, $delka) use (&$bity) {
+        for ($i = $delka - 1; $i >= 0; $i--) $bity[] = ($hodnota >> $i) & 1;
+    };
+    $pridej(0x4, 4);
+    $pridej($n, $verze <= 9 ? 8 : 16);
+    foreach ($bytes as $b) $pridej($b, 8);
+    $kapacita = $datovych * 8;
+    $pridej(0, min(4, $kapacita - count($bity)));
+    $pridej(0, (8 - count($bity) % 8) % 8);
+    for ($pad = 0xEC; count($bity) < $kapacita; $pad ^= 0xEC ^ 0x11) $pridej($pad, 8);
+    $data = [];
+    for ($i = 0; $i < count($bity); $i += 8) {
+        $b = 0;
+        for ($j = 0; $j < 8; $j++) $b = ($b << 1) | $bity[$i + $j];
+        $data[] = $b;
+    }
+
+    // Bloky + Reed-Solomon, prokládání
+    $divisor = sb_qr_rs_divisor($ec_len);
+    $bloky = []; $ecc = []; $pos = 0;
+    foreach ($skupiny as $g) {
+        for ($k = 0; $k < $g[0]; $k++) {
+            $blok = array_slice($data, $pos, $g[1]);
+            $pos += $g[1];
+            $bloky[] = $blok;
+            $ecc[] = sb_qr_rs_remainder($blok, $divisor);
+        }
+    }
+    $slova = [];
+    $max = 0;
+    foreach ($bloky as $b) $max = max($max, count($b));
+    for ($i = 0; $i < $max; $i++) foreach ($bloky as $b) if ($i < count($b)) $slova[] = $b[$i];
+    for ($i = 0; $i < $ec_len; $i++) foreach ($ecc as $e) $slova[] = $e[$i];
+
+    // Matice a funkční vzory
+    $size = $verze * 4 + 17;
+    $m = array_fill(0, $size, array_fill(0, $size, false));
+    $f = array_fill(0, $size, array_fill(0, $size, false));
+    $set = function($x, $y, $dark) use (&$m, &$f) { $m[$y][$x] = $dark; $f[$y][$x] = true; };
+
+    for ($i = 0; $i < $size; $i++) { $set(6, $i, $i % 2 == 0); $set($i, 6, $i % 2 == 0); }
+    foreach ([[3, 3], [$size - 4, 3], [3, $size - 4]] as $c) {
+        for ($dy = -4; $dy <= 4; $dy++) for ($dx = -4; $dx <= 4; $dx++) {
+            $x = $c[0] + $dx; $y = $c[1] + $dy;
+            if ($x < 0 || $y < 0 || $x >= $size || $y >= $size) continue;
+            $d = max(abs($dx), abs($dy));
+            $set($x, $y, $d != 2 && $d != 4);
+        }
+    }
+    $al = $zarovnani[$verze];
+    $na = count($al);
+    for ($i = 0; $i < $na; $i++) for ($j = 0; $j < $na; $j++) {
+        if (($i == 0 && $j == 0) || ($i == 0 && $j == $na - 1) || ($i == $na - 1 && $j == 0)) continue;
+        for ($dy = -2; $dy <= 2; $dy++) for ($dx = -2; $dx <= 2; $dx++) {
+            $set($al[$i] + $dx, $al[$j] + $dy, max(abs($dx), abs($dy)) != 1);
+        }
+    }
+    $format = function($mask) use ($set, $size) {
+        $data = (0 << 3) | $mask; // úroveň M = 00
+        $rem = $data;
+        for ($i = 0; $i < 10; $i++) $rem = ($rem << 1) ^ (($rem >> 9) * 0x537);
+        $bits = (($data << 10) | $rem) ^ 0x5412;
+        $bit = function($i) use ($bits) { return (($bits >> $i) & 1) != 0; };
+        for ($i = 0; $i <= 5; $i++) $set(8, $i, $bit($i));
+        $set(8, 7, $bit(6)); $set(8, 8, $bit(7)); $set(7, 8, $bit(8));
+        for ($i = 9; $i < 15; $i++) $set(14 - $i, 8, $bit($i));
+        for ($i = 0; $i < 8; $i++) $set($size - 1 - $i, 8, $bit($i));
+        for ($i = 8; $i < 15; $i++) $set(8, $size - 15 + $i, $bit($i));
+        $set(8, $size - 8, true);
+    };
+    $format(0);
+    if ($verze >= 7) {
+        $rem = $verze;
+        for ($i = 0; $i < 12; $i++) $rem = ($rem << 1) ^ (($rem >> 11) * 0x1F25);
+        $bits = ($verze << 12) | $rem;
+        for ($i = 0; $i < 18; $i++) {
+            $bit = (($bits >> $i) & 1) != 0;
+            $a = $size - 11 + $i % 3; $b = intdiv($i, 3);
+            $set($a, $b, $bit); $set($b, $a, $bit);
+        }
+    }
+
+    // Data (cik-cak)
+    $i = 0; $celkem_bitu = count($slova) * 8;
+    for ($right = $size - 1; $right >= 1; $right -= 2) {
+        if ($right == 6) $right = 5;
+        for ($vert = 0; $vert < $size; $vert++) {
+            for ($j = 0; $j < 2; $j++) {
+                $x = $right - $j;
+                $upward = (($right + 1) & 2) == 0;
+                $y = $upward ? $size - 1 - $vert : $vert;
+                if (!$f[$y][$x] && $i < $celkem_bitu) {
+                    $m[$y][$x] = (($slova[$i >> 3] >> (7 - ($i & 7))) & 1) != 0;
+                    $i++;
+                }
+            }
+        }
+    }
+
+    // Maska s nejnižší penalizací
+    $maskuj = function($mat, $mask) use ($f, $size) {
+        for ($y = 0; $y < $size; $y++) for ($x = 0; $x < $size; $x++) {
+            if ($f[$y][$x]) continue;
+            switch ($mask) {
+                case 0: $inv = ($x + $y) % 2 == 0; break;
+                case 1: $inv = $y % 2 == 0; break;
+                case 2: $inv = $x % 3 == 0; break;
+                case 3: $inv = ($x + $y) % 3 == 0; break;
+                case 4: $inv = (intdiv($x, 3) + intdiv($y, 2)) % 2 == 0; break;
+                case 5: $inv = $x * $y % 2 + $x * $y % 3 == 0; break;
+                case 6: $inv = ($x * $y % 2 + $x * $y % 3) % 2 == 0; break;
+                default: $inv = (($x + $y) % 2 + $x * $y % 3) % 2 == 0;
+            }
+            if ($inv) $mat[$y][$x] = !$mat[$y][$x];
+        }
+        return $mat;
+    };
+    $penalizace = function($mat) use ($size) {
+        $p = 0; $tmavych = 0;
+        $vzor1 = [true, false, true, true, true, false, true, false, false, false, false];
+        $vzor2 = [false, false, false, false, true, false, true, true, true, false, true];
+        for ($smer = 0; $smer < 2; $smer++) {
+            for ($a = 0; $a < $size; $a++) {
+                $run = 0; $prev = null; $radek = [];
+                for ($b = 0; $b < $size; $b++) {
+                    $v = $smer ? $mat[$b][$a] : $mat[$a][$b];
+                    $radek[] = $v;
+                    if ($v === $prev) { $run++; } else { if ($run >= 5) $p += 3 + $run - 5; $run = 1; $prev = $v; }
+                }
+                if ($run >= 5) $p += 3 + $run - 5;
+                for ($b = 0; $b + 11 <= $size; $b++) {
+                    $s = array_slice($radek, $b, 11);
+                    if ($s === $vzor1 || $s === $vzor2) $p += 40;
+                }
+            }
+        }
+        for ($y = 0; $y < $size; $y++) for ($x = 0; $x < $size; $x++) {
+            if ($mat[$y][$x]) $tmavych++;
+            if ($x + 1 < $size && $y + 1 < $size) {
+                $c = $mat[$y][$x];
+                if ($mat[$y][$x + 1] === $c && $mat[$y + 1][$x] === $c && $mat[$y + 1][$x + 1] === $c) $p += 3;
+            }
+        }
+        $p += 10 * (int) floor(abs($tmavych * 100 / ($size * $size) - 50) / 5);
+        return $p;
+    };
+    $nejlepsi = null; $nejlepsi_p = PHP_INT_MAX; $nejlepsi_mask = 0;
+    for ($mask = 0; $mask < 8; $mask++) {
+        $format($mask);
+        $kandidat = $maskuj($m, $mask);
+        // formátové bity jsou ve funkčních modulech – je třeba je zkopírovat i do kandidáta
+        $pen = $penalizace($kandidat);
+        if ($pen < $nejlepsi_p) { $nejlepsi_p = $pen; $nejlepsi = $kandidat; $nejlepsi_mask = $mask; }
+    }
+    $format($nejlepsi_mask);
+    $vysledek = $maskuj($m, $nejlepsi_mask);
+    return $vysledek;
+}
+
+// QR kód jako inline SVG (pro web).
+function sb_qr_svg($text, $px = 200) {
+    $mat = sb_qr_matice($text);
+    if (!$mat) return '';
+    $size = count($mat);
+    $q = 4;
+    $cesta = '';
+    for ($y = 0; $y < $size; $y++) for ($x = 0; $x < $size; $x++) {
+        if ($mat[$y][$x]) $cesta .= 'M' . ($x + $q) . ',' . ($y + $q) . 'h1v1h-1z';
+    }
+    $rozmer = $size + 2 * $q;
+    return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 $rozmer $rozmer' width='" . intval($px) . "' height='" . intval($px) . "' shape-rendering='crispEdges' role='img' aria-label='QR kód pro platbu'>"
+         . "<rect width='100%' height='100%' fill='#fff'/><path d='$cesta' fill='#000'/></svg>";
+}
+
+// QR kód jako PNG (pro e-mail); vyžaduje rozšíření GD. Vrací binární data nebo ''.
+function sb_qr_png($text, $modul = 6) {
+    if (!function_exists('imagecreate')) return '';
+    $mat = sb_qr_matice($text);
+    if (!$mat) return '';
+    $size = count($mat);
+    $q = 4;
+    $px = ($size + 2 * $q) * $modul;
+    $img = imagecreate($px, $px);
+    $bila = imagecolorallocate($img, 255, 255, 255);
+    $cerna = imagecolorallocate($img, 0, 0, 0);
+    imagefill($img, 0, 0, $bila);
+    for ($y = 0; $y < $size; $y++) for ($x = 0; $x < $size; $x++) {
+        if ($mat[$y][$x]) {
+            imagefilledrectangle($img, ($x + $q) * $modul, ($y + $q) * $modul, ($x + $q + 1) * $modul - 1, ($y + $q + 1) * $modul - 1, $cerna);
+        }
+    }
+    ob_start();
+    imagepng($img);
+    $png = ob_get_clean();
+    imagedestroy($img);
+    return $png;
+}
+
+// Převod českého čísla účtu (např. 2300221146/2010 nebo 19-123/0800) na IBAN; '' při chybě.
+function sb_cz_iban($ucet) {
+    if (!preg_match('/^\s*(?:(\d{1,6})-)?(\d{1,10})\s*\/\s*(\d{4})\s*$/', (string) $ucet, $m)) return '';
+    $bban = $m[3] . str_pad($m[1], 6, '0', STR_PAD_LEFT) . str_pad($m[2], 10, '0', STR_PAD_LEFT);
+    $cislo = $bban . '123500'; // C=12, Z=35, 00
+    $zbytek = 0;
+    foreach (str_split($cislo) as $c) $zbytek = ($zbytek * 10 + intval($c)) % 97;
+    return 'CZ' . str_pad((string) (98 - $zbytek), 2, '0', STR_PAD_LEFT) . $bban;
+}
+
+// Bez diakritiky a jen tisknutelné ASCII (pro QR Platbu).
+function sb_ascii($text) {
+    $text = remove_accents((string) $text);
+    return trim(preg_replace('/[^\x20-\x7E]/', '', $text));
+}
+
+// --- Nastavení a výpočet příspěvku ---
+
+// Nastavení příspěvku pro rok: ['1','2','3' (Kč za dítě), 'ucet', 'od', 'do'] nebo null.
+function sb_prispevek_nastaveni($rok) {
+    $vse = get_option('sb_prispevky', []);
+    $n = (is_array($vse) && isset($vse[intval($rok)]) && is_array($vse[intval($rok)])) ? $vse[intval($rok)] : null;
+    if (!$n || (intval($n['1'] ?? 0) + intval($n['2'] ?? 0) + intval($n['3'] ?? 0)) <= 0) return null;
+    return $n;
+}
+
+// Jména dětí, které se v roce $rok počítají (aktivní + odešlé až od pozdějšího roku).
+function sb_deti_jmena_pro_rok($rodina_id, $rok) {
+    $jmena = [];
+    $deti = get_post_meta($rodina_id, 'deti_rodiny', true);
+    if (is_array($deti)) foreach ($deti as $d) if (is_array($d) && !empty($d['jmeno'])) $jmena[] = $d['jmeno'];
+    foreach (sb_deti_archiv($rodina_id) as $d) {
+        if (is_array($d) && !empty($d['jmeno']) && isset($d['od_roku']) && intval($d['od_roku']) > intval($rok)) $jmena[] = $d['jmeno'];
+    }
+    return $jmena;
+}
+
+// Brigádnický poplatek rodiny za rok (stejný výpočet jako Roční výpis).
+function sb_brigadni_poplatek($rodina, $rok) {
+    $vysl = ['pozadavek' => 0, 'odpracovano' => 0, 'chybi' => 0, 'sazba' => 0, 'castka' => 0, 'v_roce' => false];
+    if (!sb_rodina_v_roce($rodina, $rok)) return $vysl;
+    $vysl['v_roce'] = true;
+    $pozadavky = get_option('pozadavky_dle_roku', []);
+    $p = (is_array($pozadavky) && isset($pozadavky[intval($rok)])) ? $pozadavky[intval($rok)] : null;
+    if (!$p) return $vysl;
+    $n = sb_pocet_deti_pro_rok($rodina->ID, $rok);
+    $poz = 0;
+    if ($n == 1) $poz = intval($p['1'] ?? 0);
+    elseif ($n == 2) $poz = intval($p['2'] ?? 0);
+    elseif ($n >= 3) $poz = intval($p['3'] ?? 0);
+    $odpr = sb_odpracovano_v_roce($rodina, $rok) + sb_prevod_hodin($rodina, $rok);
+    $vysl['pozadavek']   = $poz;
+    $vysl['odpracovano'] = $odpr;
+    $vysl['chybi']       = max(0, $poz - $odpr);
+    $vysl['sazba']       = floatval($p['sazba'] ?? 0);
+    $vysl['castka']      = (int) round($vysl['chybi'] * $vysl['sazba']);
+    return $vysl;
+}
+
+// Uložené platby (splátky) rodiny za rok – pole kladných částek v Kč.
+function sb_platby($rodina_id, $rok) {
+    $p = get_post_meta($rodina_id, 'sb_platby_' . intval($rok), true);
+    if (!is_array($p)) return [];
+    return array_values(array_filter(array_map('intval', $p), function($x) { return $x > 0; }));
+}
+
+// Kompletní příspěvek rodiny na rok, nebo null, pokud rodina v daném roce neplatí.
+function sb_prispevek_rodiny($rodina, $rok) {
+    $rok  = intval($rok);
+    $nast = sb_prispevek_nastaveni($rok);
+    if (!$nast || !sb_rodina_v_roce($rodina, $rok)) return null;
+    $deti = sb_pocet_deti_pro_rok($rodina->ID, $rok);
+    if ($deti <= 0) return null;
+    $za_dite   = intval($deti == 1 ? $nast['1'] : ($deti == 2 ? $nast['2'] : $nast['3']));
+    $zaklad    = $deti * $za_dite;
+    $brigady   = sb_brigadni_poplatek($rodina, $rok - 1);
+    $dar       = max(0, intval(get_post_meta($rodina->ID, 'sb_dar_' . $rok, true)));
+    $celkem    = $zaklad + $brigady['castka'] + $dar;
+    $platby    = sb_platby($rodina->ID, $rok);
+    $zaplaceno = array_sum($platby);
+    $stav      = $zaplaceno <= 0 ? 'nezaplaceno' : ($zaplaceno >= $celkem ? 'zaplaceno' : 'splatky');
+    return [
+        'rok' => $rok, 'deti' => $deti, 'za_dite' => $za_dite, 'zaklad' => $zaklad,
+        'brigady' => $brigady, 'dar' => $dar, 'celkem' => $celkem,
+        'platby' => $platby, 'zaplaceno' => $zaplaceno, 'zbyva' => max(0, $celkem - $zaplaceno),
+        'stav' => $stav, 'jmena' => sb_deti_jmena_pro_rok($rodina->ID, $rok),
+        'ucet' => (string) ($nast['ucet'] ?? ''),
+    ];
+}
+
+// Zpráva pro příjemce: „Poplatek 2027 Jména dětí + dar 500". Pro QR bez diakritiky, max. 60 znaků.
+function sb_platba_zprava($info, $pro_qr = false) {
+    $jmena  = $info['jmena'];
+    $dovetek = $info['dar'] > 0 ? ' + dar ' . intval($info['dar']) : '';
+    if (!$pro_qr) {
+        return trim('Poplatek ' . $info['rok'] . ' ' . implode(', ', $jmena)) . $dovetek;
+    }
+    $jmena_txt = sb_ascii(implode(', ', $jmena));
+    $plna = 'Poplatek ' . $info['rok'] . ' ' . $jmena_txt;
+    if (strlen($plna . $dovetek) <= 60) return trim($plna) . $dovetek;
+    $volno = 60 - strlen('Poplatek ') - strlen($dovetek);
+    $zkr = rtrim(substr($jmena_txt, 0, max(0, $volno)), ' ,');
+    return trim('Poplatek ' . $zkr) . $dovetek;
+}
+
+// Řetězec QR Platby (SPD) na zbývající částku, nebo '' (zaplaceno / chybí účet).
+function sb_platba_spd($info) {
+    $iban = sb_cz_iban($info['ucet']);
+    if ($iban === '' || $info['zbyva'] <= 0) return '';
+    $msg = str_replace('*', '', sb_platba_zprava($info, true));
+    return 'SPD*1.0*ACC:' . $iban . '*AM:' . number_format($info['zbyva'], 2, '.', '') . '*CC:CZK*MSG:' . $msg;
+}
+
+// Je dnes v období, kdy se má příspěvek rodičům zobrazovat?
+function sb_prispevek_aktivni($rok) {
+    $nast = sb_prispevek_nastaveni($rok);
+    if (!$nast || empty($nast['od']) || empty($nast['do'])) return false;
+    $dnes = wp_date('Y-m-d');
+    return $dnes >= $nast['od'] && $dnes <= $nast['do'];
+}
+
+function sb_kc($castka) {
+    return number_format((float) $castka, 0, ',', ' ') . ' Kč';
+}
+
+// Adresa stránky se shortcodem [moje_brigady] (pro odkaz v e-mailu).
+function sb_moje_brigady_url() {
+    global $wpdb;
+    $id = $wpdb->get_var("SELECT ID FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type = 'page' AND post_content LIKE '%[moje_brigady%' LIMIT 1");
+    return $id ? get_permalink($id) : home_url('/');
+}
+
+// Rozpis příspěvku jako HTML tabulka (web i e-mail). $qr_html = obrázek QR (SVG nebo <img>).
+function sb_prispevek_html($info, $qr_html, $pro_email = false) {
+    $rok = intval($info['rok']);
+    $td  = "style='padding:3px 14px 3px 0; color:#555; vertical-align:top;'";
+    $tdv = "style='padding:3px 0; vertical-align:top;'";
+    $h  = "<table style='border-collapse:collapse; font-size:14px; line-height:1.5;'>";
+    $h .= "<tr><td $td>Příspěvek za děti:</td><td $tdv>" . intval($info['deti']) . " × " . sb_kc($info['za_dite']) . " = <strong>" . sb_kc($info['zaklad']) . "</strong></td></tr>";
+    $b = $info['brigady'];
+    if ($b['v_roce']) {
+        if ($b['castka'] > 0) {
+            $h .= "<tr><td $td>Doplatek za brigády " . ($rok - 1) . ":</td><td $tdv>" . intval($b['chybi']) . " h z " . intval($b['pozadavek']) . " h neodpracováno × " . sb_kc($b['sazba']) . " = <strong>" . sb_kc($b['castka']) . "</strong></td></tr>";
+        } else {
+            $h .= "<tr><td $td>Doplatek za brigády " . ($rok - 1) . ":</td><td $tdv><strong>0 Kč</strong> – brigády splněny, děkujeme!</td></tr>";
+        }
+    }
+    if ($info['dar'] > 0) {
+        $h .= "<tr><td $td>Sponzorský dar:</td><td $tdv><strong>" . sb_kc($info['dar']) . "</strong></td></tr>";
+    }
+    $h .= "<tr><td $td><strong>Celkem:</strong></td><td $tdv><strong style='font-size:16px;'>" . sb_kc($info['celkem']) . "</strong></td></tr>";
+    if ($info['stav'] === 'splatky') {
+        $h .= "<tr><td $td>Uhrazeno:</td><td $tdv>" . sb_kc($info['zaplaceno']) . "</td></tr>";
+        $h .= "<tr><td $td><strong>Zbývá uhradit:</strong></td><td $tdv><strong>" . sb_kc($info['zbyva']) . "</strong></td></tr>";
+    }
+    $h .= "</table>";
+
+    if ($info['stav'] === 'zaplaceno') {
+        $h .= "<p style='margin:12px 0 0; padding:8px 12px; background:#e8f5e9; border-left:4px solid #2e7d32; color:#1b5e20; font-weight:600;'>✅ Uhrazeno – děkujeme!</p>";
+        return $h;
+    }
+
+    $h .= "<div style='display:flex; flex-wrap:wrap; gap:16px; align-items:flex-start; margin-top:12px;'>";
+    $h .= "<table style='border-collapse:collapse; font-size:14px; line-height:1.5;'>";
+    $h .= "<tr><td $td>Číslo účtu:</td><td $tdv><strong>" . esc_html($info['ucet']) . "</strong></td></tr>";
+    $h .= "<tr><td $td>Částka:</td><td $tdv><strong>" . sb_kc($info['zbyva']) . "</strong></td></tr>";
+    $h .= "<tr><td $td>Zpráva pro příjemce:</td><td $tdv><strong>" . esc_html(sb_platba_zprava($info)) . "</strong></td></tr>";
+    $h .= "</table>";
+    if ($qr_html) {
+        $h .= "<div style='text-align:center;'>" . $qr_html . "<div style='font-size:12px; color:#666;'>QR platba – naskenujte v bankovní aplikaci</div></div>";
+    }
+    $h .= "</div>";
+    return $h;
+}
+
+// E-mail s příspěvkem pro rodinu: ['predmet', 'html', 'png'].
+function sb_prispevek_email($rodina, $info) {
+    $rok = intval($info['rok']);
+    $spd = sb_platba_spd($info);
+    $png = $spd ? sb_qr_png($spd) : '';
+    $qr  = $png ? "<img src='cid:sbqrplatba' alt='QR platba' width='200' height='200' style='display:block; margin:0 auto;'>" : '';
+    $url = esc_url(sb_moje_brigady_url());
+    $h  = "<div style='font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#222; max-width:640px;'>";
+    $h .= "<p>Milí rodiče,</p>";
+    $h .= "<p>posíláme podklady pro úhradu <strong>členského příspěvku na rok $rok</strong> za rodinu <strong>" . esc_html($rodina->post_title) . "</strong>.</p>";
+    $h .= sb_prispevek_html($info, $qr, true);
+    if ($info['stav'] !== 'zaplaceno') {
+        $h .= "<p style='margin-top:16px;'>Pokud vám to přijde smysluplné a váš rodinný rozpočet to dovolí, můžete nás podpořit i formou sponzorského daru – částku stačí k příspěvku jednoduše přidat. Na dar vám rádi vystavíme potvrzení. Dar můžete zadat i po přihlášení na webu v sekci <a href='$url'>Moje brigády</a>, kde se vám rovnou upraví částka i QR kód.</p>";
+    }
+    $h .= "<p>Přehled odpracovaných hodin najdete po přihlášení na webu v sekci <a href='$url'>Moje brigády</a>.</p>";
+    $h .= "<p>V případě dotazů stačí odpovědět na tento e-mail.</p>";
+    $h .= "<p>Děkujeme,<br>Skautské středisko Černého havrana, Chlumec nad Cidlinou</p>";
+    $h .= "</div>";
+    return ['predmet' => 'Členský příspěvek ' . $rok . ' – ' . $rodina->post_title, 'html' => $h, 'png' => $png];
+}
+
+// Odeslání e-mailu s příspěvkem; vrací true/false.
+function sb_odeslat_prispevek_email($to, $email) {
+    $headers = [
+        'Content-Type: text/html; charset=UTF-8',
+        'From: Skaut Chlumec nad Cidlinou <outly@skaut.cz>',
+        'Reply-To: info@skautchlumec.cz',
+    ];
+    $png = $email['png'];
+    $vloz = function($phpmailer) use ($png) {
+        if ($png) $phpmailer->addStringEmbeddedImage($png, 'sbqrplatba', 'qr-platba.png', 'base64', 'image/png');
+    };
+    add_action('phpmailer_init', $vloz);
+    $ok = wp_mail($to, $email['predmet'], $email['html'], $headers);
+    remove_action('phpmailer_init', $vloz);
+    return (bool) $ok;
+}
+
+// =====================================================================
+// KARTA PLATBY – evidence členských příspěvků, rozesílání e-mailů
+// =====================================================================
+
+// Roky s nastaveným příspěvkem (sestupně).
+function sb_roky_prispevku() {
+    $vse = get_option('sb_prispevky', []);
+    $roky = [];
+    if (is_array($vse)) foreach (array_keys($vse) as $r) if (sb_prispevek_nastaveni($r)) $roky[] = intval($r);
+    rsort($roky);
+    return $roky;
+}
+
+// Platící rodiny pro rok: [['rodina' => WP_Post, 'info' => [...]], ...] (abecedně)
+function sb_platici_rodiny($rok) {
+    $vysl = [];
+    foreach (get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']) as $r) {
+        $info = sb_prispevek_rodiny($r, $rok);
+        if ($info) $vysl[] = ['rodina' => $r, 'info' => $info];
+    }
+    return $vysl;
+}
+
+function sb_stav_platby_html($stav) {
+    $m = [
+        'zaplaceno'   => ['Zaplaceno', '#1b5e20', '#e8f5e9', '#a5d6a7'],
+        'splatky'     => ['Splátky', '#7a4100', '#fff8e1', '#ffcc80'],
+        'nezaplaceno' => ['Nezaplaceno', '#7b1c1e', '#fff0f0', '#ef9a9a'],
+    ];
+    $s = $m[$stav] ?? $m['nezaplaceno'];
+    return "<span style='display:inline-block; white-space:nowrap; font-size:12px; font-weight:600; color:{$s[1]}; background:{$s[2]}; border:1px solid {$s[3]}; border-radius:10px; padding:1px 8px;'>{$s[0]}</span>";
+}
+
+// CSV export plateb
+function sb_export_platby_csv() {
+    if (!isset($_GET['sb_export']) || $_GET['sb_export'] !== 'platby') return;
+    if (!isset($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), 'sb_export_platby')) {
+        wp_die('Neplatný bezpečnostní token.');
+    }
+    if (!sb_muze_videt_rodiny()) wp_die('Nemáš oprávnění.');
+    $rok = isset($_GET['rok']) ? intval($_GET['rok']) : intval(wp_date('Y')) + 1;
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="platby-' . $rok . '.csv"');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, ['Rodina', 'Děti', 'Počet dětí', 'Příspěvek za děti (Kč)', 'Doplatek za brigády ' . ($rok - 1) . ' (Kč)', 'Dar (Kč)', 'Celkem (Kč)', 'Uhrazeno (Kč)', 'Zbývá (Kč)', 'Stav', 'Splátky (Kč)', 'Zpráva pro příjemce'], ';');
+    $stavy = ['zaplaceno' => 'Zaplaceno', 'splatky' => 'Splátky', 'nezaplaceno' => 'Nezaplaceno'];
+    foreach (sb_platici_rodiny($rok) as $z) {
+        $i = $z['info'];
+        fputcsv($out, [
+            $z['rodina']->post_title, implode(', ', $i['jmena']), $i['deti'], $i['zaklad'], $i['brigady']['castka'],
+            $i['dar'], $i['celkem'], $i['zaplaceno'], $i['zbyva'], $stavy[$i['stav']], implode(' + ', $i['platby']),
+            sb_platba_zprava($i),
+        ], ';');
+    }
+    fclose($out);
+    exit;
+}
+add_action('init', 'sb_export_platby_csv');
+
+function sb_platby_tab() {
+    if (!sb_muze_videt_rodiny()) {
+        return '<p>Nemáš oprávnění pro zobrazení plateb.</p>';
+    }
+    $je_spravce = sb_je_spravce();
+    $roky = sb_roky_prispevku();
+    $rok = isset($_POST['sb_platby_rok']) ? intval($_POST['sb_platby_rok']) : 0;
+    if (!$rok) {
+        foreach ($roky as $r) if (sb_prispevek_aktivni($r)) { $rok = $r; break; }
+        if (!$rok) $rok = $roky ? $roky[0] : intval(wp_date('Y')) + 1;
+    }
+    $zprava = '';
+    $mail_vybrane = null; // ID rodin, které mají zůstat zaškrtnuté (další dávka)
+    $davka = 20;
+
+    // --- Uložení plateb (jen správce) ---
+    if (isset($_POST['sb_platby_ulozit'])) {
+        if (!$je_spravce) {
+            $zprava .= sb_alert('Platby může zapisovat jen správce.', 'error');
+        } elseif (!isset($_POST['_wpnonce_platby']) || !wp_verify_nonce($_POST['_wpnonce_platby'], 'sb_platby')) {
+            $zprava .= sb_alert('Neplatný bezpečnostní token.', 'error');
+        } else {
+            $ids = (isset($_POST['sb_platby_rodiny']) && is_array($_POST['sb_platby_rodiny'])) ? array_map('intval', $_POST['sb_platby_rodiny']) : [];
+            $zmen = 0;
+            foreach ($ids as $id) {
+                $r = sb_get_rodina($id);
+                if (!$r) continue;
+                $castky = (isset($_POST['platby'][$id]) && is_array($_POST['platby'][$id])) ? $_POST['platby'][$id] : [];
+                $nove = [];
+                foreach ($castky as $c) {
+                    $c = intval(round(floatval(str_replace([' ', ','], ['', '.'], (string) $c))));
+                    if ($c > 0) $nove[] = $c;
+                }
+                if (!empty($_POST['cele'][$id])) {
+                    $info = sb_prispevek_rodiny($r, $rok);
+                    $zbytek = $info ? $info['celkem'] - array_sum($nove) : 0;
+                    if ($zbytek > 0) $nove[] = $zbytek;
+                }
+                if ($nove !== sb_platby($id, $rok)) {
+                    $zmen++;
+                    if ($nove) update_post_meta($id, 'sb_platby_' . $rok, $nove);
+                    else delete_post_meta($id, 'sb_platby_' . $rok);
+                }
+            }
+            $zprava .= sb_alert($zmen ? 'Platby byly uloženy (změněno rodin: ' . $zmen . ').' : 'Žádná změna plateb.');
+        }
+    }
+
+    // --- Zkušební e-mail správci ---
+    if (isset($_POST['sb_mail_test'])) {
+        if (!$je_spravce || !isset($_POST['_wpnonce_platby_mail']) || !wp_verify_nonce($_POST['_wpnonce_platby_mail'], 'sb_platby_mail')) {
+            $zprava .= sb_alert('Neplatný požadavek.', 'error');
+        } else {
+            $r = sb_get_rodina(intval($_POST['sb_mail_test_rodina'] ?? 0));
+            $info = $r ? sb_prispevek_rodiny($r, $rok) : null;
+            $komu = wp_get_current_user()->user_email;
+            if (!$info) {
+                $zprava .= sb_alert('Vyberte platící rodinu.', 'error');
+            } elseif (!is_email($komu)) {
+                $zprava .= sb_alert('Váš účet nemá platnou e-mailovou adresu.', 'error');
+            } else {
+                $email = sb_prispevek_email($r, $info);
+                $email['predmet'] = '[ZKOUŠKA] ' . $email['predmet'];
+                $ok = sb_odeslat_prispevek_email($komu, $email);
+                $zprava .= $ok ? sb_alert('Zkušební e-mail pro rodinu ' . $r->post_title . ' byl odeslán na ' . $komu . '.')
+                               : sb_alert('Zkušební e-mail se nepodařilo odeslat.', 'error');
+            }
+        }
+    }
+
+    // --- Rozeslání e-mailů vybraným rodinám (po dávkách) ---
+    if (isset($_POST['sb_mail_odeslat'])) {
+        if (!$je_spravce || !isset($_POST['_wpnonce_platby_mail']) || !wp_verify_nonce($_POST['_wpnonce_platby_mail'], 'sb_platby_mail')) {
+            $zprava .= sb_alert('Neplatný požadavek.', 'error');
+        } else {
+            $ids = (isset($_POST['sb_mail_rodiny']) && is_array($_POST['sb_mail_rodiny'])) ? array_values(array_unique(array_map('intval', $_POST['sb_mail_rodiny']))) : [];
+            $odeslano = []; $bez_emailu = []; $chyby = [];
+            foreach (array_slice($ids, 0, $davka) as $id) {
+                $r = sb_get_rodina($id);
+                $info = $r ? sb_prispevek_rodiny($r, $rok) : null;
+                if (!$info) continue;
+                $adresy = sb_get_rodic_emails($id);
+                if (!$adresy) { $bez_emailu[] = $r->post_title; continue; }
+                if (sb_odeslat_prispevek_email($adresy, sb_prispevek_email($r, $info))) {
+                    update_post_meta($id, 'sb_prispevek_mail_' . $rok, wp_date('j. n. Y H:i'));
+                    $odeslano[] = $r->post_title;
+                } else {
+                    $chyby[] = $r->post_title;
+                }
+            }
+            $mail_vybrane = array_slice($ids, $davka);
+            if (!$ids) {
+                $zprava .= sb_alert('Nevybrali jste žádnou rodinu.', 'error');
+            } else {
+                $zprava .= sb_alert('Odesláno rodinám: ' . count($odeslano) . '.');
+                if ($bez_emailu) $zprava .= sb_alert('Bez e-mailové adresy (rodiče nemají účet): ' . implode(', ', $bez_emailu) . '.', 'warning');
+                if ($chyby) $zprava .= sb_alert('Nepodařilo se odeslat: ' . implode(', ', $chyby) . '.', 'error');
+                if ($mail_vybrane) $zprava .= sb_alert('E-maily se posílají po ' . $davka . '. Zbývá ještě ' . count($mail_vybrane) . ' vybraných rodin – jsou zaškrtnuté níže, klikněte znovu na Odeslat.', 'info');
+            }
+        }
+    }
+
+    ob_start();
+    echo "<h3 class='sb-section-title'>💳 Platby členských příspěvků</h3>";
+    echo $zprava;
+
+    echo "<div class='sb-card'><form method='post' class='sb-form-row'>";
+    echo "<div class='sb-form-group sb-fg-inline'><label>Rok:</label><select name='sb_platby_rok'>";
+    $nabidka = $roky ?: [$rok];
+    if (!in_array($rok, $nabidka, true)) $nabidka[] = $rok;
+    foreach ($nabidka as $r) echo "<option value='" . intval($r) . "'" . ($r === $rok ? ' selected' : '') . ">" . intval($r) . "</option>";
+    echo "</select></div><input type='submit' name='sb_platby_zobraz' value='Zobrazit' class='sb-btn sb-btn-primary'></form></div>";
+
+    if (!sb_prispevek_nastaveni($rok)) {
+        echo sb_alert('Pro rok ' . $rok . ' není nastaven členský příspěvek. Správce ho nastaví v záložce Nastavit požadavky dle roku.', 'info');
+        return ob_get_clean();
+    }
+
+    $seznam = sb_platici_rodiny($rok);
+    $suma = ['celkem' => 0, 'zaplaceno' => 0, 'zbyva' => 0, 'zaplaceno_n' => 0, 'splatky_n' => 0, 'nezaplaceno_n' => 0];
+    foreach ($seznam as $z) {
+        $suma['celkem'] += $z['info']['celkem'];
+        $suma['zaplaceno'] += $z['info']['zaplaceno'];
+        $suma['zbyva'] += $z['info']['zbyva'];
+        $suma[$z['info']['stav'] . '_n']++;
+    }
+    $nast = sb_prispevek_nastaveni($rok);
+    echo "<div class='sb-card'>";
+    echo "<div style='display:flex; flex-wrap:wrap; gap:18px; font-size:14px;'>";
+    echo "<div>Platících rodin: <strong>" . count($seznam) . "</strong></div>";
+    echo "<div>Celkem k úhradě: <strong>" . sb_kc($suma['celkem']) . "</strong></div>";
+    echo "<div>Uhrazeno: <strong>" . sb_kc($suma['zaplaceno']) . "</strong></div>";
+    echo "<div>Zbývá: <strong>" . sb_kc($suma['zbyva']) . "</strong></div>";
+    echo "</div><div style='margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px;'>";
+    echo sb_stav_platby_html('zaplaceno') . " " . $suma['zaplaceno_n'] . " &nbsp; " . sb_stav_platby_html('splatky') . " " . $suma['splatky_n'] . " &nbsp; " . sb_stav_platby_html('nezaplaceno') . " " . $suma['nezaplaceno_n'];
+    echo "</div>";
+    echo "<p class='sb-text-hint' style='margin-top:8px;'>Rodičům se příspěvek v Moje brigády zobrazuje " . (!empty($nast['od']) && !empty($nast['do']) ? "od " . esc_html(date('j. n. Y', strtotime($nast['od']))) . " do " . esc_html(date('j. n. Y', strtotime($nast['do']))) : "– období zatím není nastaveno") . ". Účet: " . esc_html($nast['ucet'] ?? '') . "</p>";
+    $export_url = add_query_arg(['sb_export' => 'platby', 'rok' => $rok, '_wpnonce' => wp_create_nonce('sb_export_platby')], get_permalink());
+    echo "<a href='" . esc_url($export_url) . "' class='sb-btn sb-btn-secondary sb-btn-sm'>📥 Exportovat CSV</a>";
+    echo "</div>";
+
+    // Filtr
+    echo "<div class='sb-card'><div class='sb-form-row'>";
+    echo "<input type='text' id='sb-platby-hledat' placeholder='🔍 Hledat rodinu nebo dítě…' autocomplete='off' style='flex:1 1 220px; max-width:360px;'>";
+    echo "<select id='sb-platby-stav'><option value=''>Všechny stavy</option><option value='nezaplaceno'>Nezaplaceno</option><option value='splatky'>Splátky</option><option value='zaplaceno'>Zaplaceno</option><option value='nedoplaceno'>Nezaplaceno + splátky</option></select>";
+    echo "</div></div>";
+
+    if ($je_spravce) {
+        echo "<form method='post'>";
+        wp_nonce_field('sb_platby', '_wpnonce_platby');
+        echo "<input type='hidden' name='sb_platby_rok' value='" . intval($rok) . "'>";
+        echo "<div class='sb-btn-row' style='margin:0 0 8px;'><input type='submit' name='sb_platby_ulozit' value='💾 Uložit platby' class='sb-btn sb-btn-primary'></div>";
+    }
+    echo "<div style='overflow-x:auto; max-width:100%;'><table class='sb-table' id='sb-platby-tabulka' style='min-width:640px;'>";
+    echo "<thead><tr><th>Rodina</th><th class='center'>Příspěvek</th><th class='center'>Doplatek " . ($rok - 1) . "</th><th class='center'>Dar</th><th class='center'>Celkem</th><th>" . ($je_spravce ? 'Platby (Kč)' : 'Splátky') . "</th><th class='center'>Zbývá</th><th class='center'>Stav</th></tr></thead><tbody>";
+    foreach ($seznam as $z) {
+        $r = $z['rodina']; $i = $z['info']; $id = intval($r->ID);
+        $hledat = mb_strtolower($r->post_title . ' ' . implode(' ', $i['jmena']));
+        echo "<tr data-hledat='" . esc_attr($hledat) . "' data-stav='" . esc_attr($i['stav']) . "'>";
+        echo "<td><strong>" . esc_html($r->post_title) . "</strong><br><span class='sb-text-hint'>" . esc_html(implode(', ', $i['jmena'])) . "</span></td>";
+        echo "<td class='center' title='" . intval($i['deti']) . " × " . esc_attr(sb_kc($i['za_dite'])) . "'>" . sb_kc($i['zaklad']) . "</td>";
+        echo "<td class='center'>" . ($i['brigady']['castka'] > 0 ? sb_kc($i['brigady']['castka']) . "<br><span class='sb-text-hint'>" . intval($i['brigady']['chybi']) . " h</span>" : '–') . "</td>";
+        echo "<td class='center'>" . ($i['dar'] > 0 ? sb_kc($i['dar']) : '–') . "</td>";
+        echo "<td class='center'><strong>" . sb_kc($i['celkem']) . "</strong></td>";
+        echo "<td>";
+        if ($je_spravce) {
+            echo "<input type='hidden' name='sb_platby_rodiny[]' value='$id'>";
+            echo "<div style='display:flex; flex-wrap:wrap; gap:4px; align-items:center;'>";
+            foreach ($i['platby'] as $c) {
+                echo "<input type='number' name='platby[$id][]' value='" . intval($c) . "' min='0' style='width:80px;'>";
+            }
+            if ($i['stav'] !== 'zaplaceno') {
+                echo "<input type='number' name='platby[$id][]' value='' min='0' placeholder='" . ($i['platby'] ? 'další' : 'částka') . "' style='width:80px;'>";
+                echo "<label style='font-size:12px; white-space:nowrap;'><input type='checkbox' name='cele[$id]' value='1'> celé</label>";
+            }
+            echo "</div>";
+        } else {
+            echo $i['platby'] ? esc_html(implode(' + ', array_map('sb_kc', $i['platby']))) : '–';
+        }
+        echo "</td>";
+        echo "<td class='center'>" . ($i['zbyva'] > 0 ? sb_kc($i['zbyva']) : '–') . "</td>";
+        echo "<td class='center'>" . sb_stav_platby_html($i['stav']) . "</td>";
+        echo "</tr>";
+    }
+    if (!$seznam) echo "<tr><td colspan='8' class='center sb-text-muted'>Žádná rodina zatím neplatí.</td></tr>";
+    echo "</tbody></table></div>";
+    if ($je_spravce) {
+        echo "<p class='sb-text-hint'>Zapište přijatou částku. U splátek se po uložení objeví další pole, dokud není uhrazeno celé. Zaškrtnutím „celé“ se doplní celá zbývající částka. Chybnou platbu opravíte přepsáním nebo smazáním čísla.</p>";
+        echo "<div class='sb-btn-row'><input type='submit' name='sb_platby_ulozit' value='💾 Uložit platby' class='sb-btn sb-btn-primary'></div>";
+        echo "</form>";
+    } else {
+        echo "<p class='sb-text-hint'>Platby zapisuje správce. Pokud platba některé rodiny nedorazí včas, prosíme, připomeňte ji rodičům.</p>";
+    }
+
+    // --- Rozeslání e-mailů (jen správce) ---
+    if ($je_spravce) {
+        echo "<div class='sb-card' style='margin-top:24px;'>";
+        echo "<h4 class='sb-card-title'>📧 Rozeslat e-maily s příspěvkem " . intval($rok) . "</h4>";
+        echo "<p class='sb-text-muted' style='margin-bottom:10px;'>E-mail obsahuje rozpis příspěvku, platební údaje a QR kód. Odpovědi chodí na info@skautchlumec.cz. Posílá se všem rodičům rodiny, kteří mají na webu účet.</p>";
+        echo "<form method='post' id='sb-mail-form'>";
+        wp_nonce_field('sb_platby_mail', '_wpnonce_platby_mail');
+        echo "<input type='hidden' name='sb_platby_rok' value='" . intval($rok) . "'>";
+        echo "<div class='sb-form-row' style='margin-bottom:12px;'>";
+        echo "<select name='sb_mail_test_rodina' style='max-width:260px;'>";
+        foreach ($seznam as $z) echo "<option value='" . intval($z['rodina']->ID) . "'>" . esc_html($z['rodina']->post_title) . "</option>";
+        echo "</select>";
+        echo "<input type='submit' name='sb_mail_test' value='Poslat zkušební e-mail mně' class='sb-btn sb-btn-secondary'>";
+        echo "</div>";
+        echo "<div class='sb-btn-row' style='margin:0 0 8px;'>";
+        echo "<button type='button' class='sb-btn sb-btn-secondary sb-btn-sm' onclick=\"sbMailVyber('vse')\">Označit vše</button>";
+        echo "<button type='button' class='sb-btn sb-btn-secondary sb-btn-sm' onclick=\"sbMailVyber('nic')\">Odznačit vše</button>";
+        echo "<button type='button' class='sb-btn sb-btn-secondary sb-btn-sm' onclick=\"sbMailVyber('nezaplacene')\">Jen nezaplacené a splátky</button>";
+        echo "<button type='button' class='sb-btn sb-btn-secondary sb-btn-sm' onclick=\"sbMailVyber('neodeslane')\">Jen dosud neodeslané</button>";
+        echo "</div>";
+        echo "<div style='overflow-x:auto;'><table class='sb-table' style='min-width:520px;'><thead><tr><th class='center'>✉</th><th>Rodina</th><th>E-maily</th><th class='center'>Stav</th><th>Naposledy odesláno</th></tr></thead><tbody>";
+        foreach ($seznam as $z) {
+            $id = intval($z['rodina']->ID);
+            $adresy = sb_get_rodic_emails($id);
+            $odeslano = get_post_meta($id, 'sb_prispevek_mail_' . $rok, true);
+            $zaskrt = $mail_vybrane !== null && in_array($id, $mail_vybrane, true);
+            echo "<tr>";
+            echo "<td class='center'><input type='checkbox' name='sb_mail_rodiny[]' value='$id' class='sb-mail-cb' data-stav='" . esc_attr($z['info']['stav']) . "' data-odeslano='" . ($odeslano ? '1' : '0') . "'" . ($zaskrt ? ' checked' : '') . ($adresy ? '' : ' disabled') . "></td>";
+            echo "<td>" . esc_html($z['rodina']->post_title) . "</td>";
+            echo "<td class='sb-small'>" . ($adresy ? esc_html(implode(', ', $adresy)) : "<em style='color:#b00;'>bez e-mailu</em>") . "</td>";
+            echo "<td class='center'>" . sb_stav_platby_html($z['info']['stav']) . "</td>";
+            echo "<td class='sb-small'>" . ($odeslano ? esc_html($odeslano) : '–') . "</td>";
+            echo "</tr>";
+        }
+        echo "</tbody></table></div>";
+        echo "<div class='sb-btn-row'><input type='submit' name='sb_mail_odeslat' value='📧 Odeslat vybraným' class='sb-btn sb-btn-primary' onclick=\"return confirm('Odeslat e-mail s příspěvkem vybraným rodinám?');\"></div>";
+        echo "<p class='sb-text-hint'>E-maily se posílají po $davka rodinách na jedno kliknutí. Rodiny bez e-mailu (rodiče si ještě nezaložili účet) nelze vybrat – až si účet založí, stačí jim e-mail doposlat.</p>";
+        echo "</form></div>";
+    }
+
+    echo "<script>
+function sbMailVyber(co) {
+    document.querySelectorAll('.sb-mail-cb').forEach(function(cb) {
+        if (cb.disabled) { cb.checked = false; return; }
+        if (co === 'vse') cb.checked = true;
+        else if (co === 'nic') cb.checked = false;
+        else if (co === 'nezaplacene') cb.checked = cb.getAttribute('data-stav') !== 'zaplaceno';
+        else if (co === 'neodeslane') cb.checked = cb.getAttribute('data-odeslano') === '0';
+    });
+}
+(function() {
+    var q = document.getElementById('sb-platby-hledat'), s = document.getElementById('sb-platby-stav');
+    if (!q || !s) return;
+    function filtr() {
+        var t = q.value.toLowerCase().trim(), st = s.value;
+        document.querySelectorAll('#sb-platby-tabulka tbody tr[data-stav]').forEach(function(tr) {
+            var stav = tr.getAttribute('data-stav');
+            var okStav = !st || st === stav || (st === 'nedoplaceno' && stav !== 'zaplaceno');
+            var okText = !t || tr.getAttribute('data-hledat').indexOf(t) > -1;
+            tr.style.display = (okStav && okText) ? '' : 'none';
+        });
+    }
+    q.addEventListener('input', filtr); s.addEventListener('change', filtr);
+})();
+</script>";
+
+    return ob_get_clean();
+}
+
  function sb_spravce_brigad_shortcode() {
   $current_user = wp_get_current_user();
 $roles = $current_user->roles;
@@ -546,7 +1351,7 @@ if (array_intersect($roles, $allowed_limited)) {
             $aktivni_sekce = 'prehled';
         }
         // Nastavit požadavky
-        if (isset($_POST['upravit_pozadavky_dle_roku']) || isset($_POST['ulozit_pozadavky']) || isset($_POST['sb_revize_akce'])) {
+        if (isset($_POST['upravit_pozadavky_dle_roku']) || isset($_POST['ulozit_pozadavky']) || isset($_POST['sb_revize_akce']) || isset($_POST['sb_prispevky_ulozit'])) {
             $aktivni_sekce = 'upravit_pozadavky';
         }
         // Rodiny dle brigád
@@ -556,6 +1361,10 @@ if (array_intersect($roles, $allowed_limited)) {
         // Roční výpis
         if (isset($_POST['zobraz_rocni_vypis'])) {
             $aktivni_sekce = 'rocni_vypis';
+        }
+        // Platby
+        if (isset($_POST['sb_platby_zobraz']) || isset($_POST['sb_platby_ulozit']) || isset($_POST['sb_mail_odeslat']) || isset($_POST['sb_mail_test'])) {
+            $aktivni_sekce = 'platby';
         }
     }
 
@@ -737,6 +1546,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
             <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
             <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
+            <button onclick="sbShowSection('platby')">💳 Platby</button>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
     <button onclick="sbShowSection('napoveda')">📘 Nápověda</button>
     <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
@@ -744,6 +1554,7 @@ if (array_intersect($roles, $allowed_limited)) {
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
     <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
     <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
+    <button onclick="sbShowSection('platby')">💳 Platby</button>
 <?php endif; ?>
     </div>
     
@@ -868,6 +1679,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
             <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
+            <div id="sb-platby" class="<?php echo ($aktivni_sekce === 'platby') ? 'sb-active' : ''; ?>"><?php echo sb_platby_tab(); ?></div>
         <?php elseif (array_intersect($roles, $allowed_limited)) : ?>
             <div id="sb-napoveda" class="<?php echo ($aktivni_sekce === 'napoveda') ? 'sb-active' : ''; ?>"><?php echo sb_napoveda_vedouci(); ?></div>
             <div id="sb-rodiny" class="<?php echo ($aktivni_sekce === 'rodiny') ? 'sb-active' : ''; ?>"><?php echo sb_vytvorit_rodinu(); ?></div>
@@ -875,6 +1687,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
             <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
+            <div id="sb-platby" class="<?php echo ($aktivni_sekce === 'platby') ? 'sb-active' : ''; ?>"><?php echo sb_platby_tab(); ?></div>
         <?php endif; ?>
     </div>
     </div><!-- .sb-admin-wrap -->
@@ -1954,6 +2767,40 @@ function sb_upravit_pozadavky_dle_roku() {
         } // konec else nonce
     }
 
+    // Členský příspěvek – uložení nastavení (jen správce)
+    if (isset($_POST['sb_prispevky_ulozit']) && sb_je_spravce()) {
+        if (!isset($_POST['_wpnonce_prispevky']) || !wp_verify_nonce($_POST['_wpnonce_prispevky'], 'sb_prispevky')) {
+            $zprava = sb_alert('Neplatný bezpečnostní token. Zkuste to prosím znovu.', 'error');
+        } else {
+            $rok_p = intval($_POST['sb_prispevky_ulozit']);
+            $ucet  = sanitize_text_field(wp_unslash($_POST['prispevek_ucet'] ?? ''));
+            $od    = sanitize_text_field(wp_unslash($_POST['prispevek_od'] ?? ''));
+            $do    = sanitize_text_field(wp_unslash($_POST['prispevek_do'] ?? ''));
+            $datum_ok = function($d) { return $d === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $d); };
+            if ($rok_p < 2000 || $rok_p > intval(date('Y')) + 5) {
+                $zprava = sb_alert('Neplatný rok.', 'error');
+            } elseif ($ucet !== '' && sb_cz_iban($ucet) === '') {
+                $zprava = sb_alert('Číslo účtu není ve tvaru 123456789/0100 (případně s předčíslím 19-123456789/0100).', 'error');
+            } elseif (!$datum_ok($od) || !$datum_ok($do) || ($od !== '' && $do !== '' && $od > $do)) {
+                $zprava = sb_alert('Zkontrolujte období zobrazení (datum „od" musí být před datem „do").', 'error');
+            } else {
+                $vse = get_option('sb_prispevky', []);
+                if (!is_array($vse)) $vse = [];
+                $vse[$rok_p] = [
+                    '1'    => max(0, intval($_POST['prispevek_1'] ?? 0)),
+                    '2'    => max(0, intval($_POST['prispevek_2'] ?? 0)),
+                    '3'    => max(0, intval($_POST['prispevek_3'] ?? 0)),
+                    'ucet' => $ucet,
+                    'od'   => $od,
+                    'do'   => $do,
+                ];
+                update_option('sb_prispevky', $vse, false);
+                $zprava = sb_alert('Nastavení členského příspěvku pro rok ' . $rok_p . ' bylo uloženo.');
+                $vybrany_rok = $rok_p;
+            }
+        }
+    }
+
     // Revize rodin – zahájení a ukončení (jen správce)
     if (isset($_POST['sb_revize_akce']) && sb_je_spravce()) {
         if (!isset($_POST['_wpnonce_revize']) || !wp_verify_nonce($_POST['_wpnonce_revize'], 'sb_revize')) {
@@ -2045,6 +2892,28 @@ function sb_upravit_pozadavky_dle_roku() {
     echo "</form>";
     echo "</div>";
     
+// Členský příspěvek pro vybraný rok
+$prisp_vse = get_option('sb_prispevky', []);
+$prisp = (is_array($prisp_vse) && isset($prisp_vse[$vybrany_rok])) ? $prisp_vse[$vybrany_rok] : [];
+$prisp_ucet = $prisp['ucet'] ?? '2300221146/2010';
+echo "<div class='sb-card' style='max-width:480px;'>";
+echo "<h4 class='sb-card-title'>💳 Členský příspěvek " . intval($vybrany_rok) . "</h4>";
+echo "<p class='sb-text-muted' style='margin-bottom:10px;'>Příspěvek = počet dětí × částka podle počtu dětí v rodině + doplatek za neodpracované brigádní hodiny roku " . (intval($vybrany_rok) - 1) . ". Rodiny v archivu neplatí.</p>";
+echo "<form method='post'>";
+wp_nonce_field('sb_prispevky', '_wpnonce_prispevky');
+echo "<input type='hidden' name='sb_prispevky_ulozit' value='" . intval($vybrany_rok) . "'>";
+echo "<input type='hidden' name='vybrany_rok' value='" . intval($vybrany_rok) . "'>";
+echo "<div class='sb-form-group'><label>Za každé dítě, je-li v rodině 1 dítě (Kč):</label><input type='number' name='prispevek_1' value='" . esc_attr($prisp['1'] ?? '') . "' min='0' style='width:110px;'></div>";
+echo "<div class='sb-form-group'><label>Za každé dítě, jsou-li v rodině 2 děti (Kč):</label><input type='number' name='prispevek_2' value='" . esc_attr($prisp['2'] ?? '') . "' min='0' style='width:110px;'></div>";
+echo "<div class='sb-form-group'><label>Za každé dítě, jsou-li v rodině 3 a více dětí (Kč):</label><input type='number' name='prispevek_3' value='" . esc_attr($prisp['3'] ?? '') . "' min='0' style='width:110px;'></div>";
+echo "<div class='sb-form-group'><label>Číslo účtu:</label><input type='text' name='prispevek_ucet' value='" . esc_attr($prisp_ucet) . "' placeholder='2300221146/2010'></div>";
+echo "<div class='sb-form-group'><label>Rodičům zobrazit v Moje brigády od – do:</label>";
+echo "<input type='date' name='prispevek_od' value='" . esc_attr($prisp['od'] ?? '') . "' style='width:160px;'> – ";
+echo "<input type='date' name='prispevek_do' value='" . esc_attr($prisp['do'] ?? '') . "' style='width:160px;'></div>";
+echo "<div class='sb-btn-row'><input type='submit' value='💾 Uložit příspěvek' class='sb-btn sb-btn-primary'></div>";
+echo "</form>";
+echo "</div>";
+
 // Přehledová tabulka všech uložených požadavků
 echo "<div class='sb-card'>";
 echo "<h4 class='sb-card-title'>📊 Přehled požadavků dle roku</h4>";
@@ -3037,6 +3906,21 @@ function sb_moje_brigady_shortcode() {
                 sb_notify_spravci_zmena($id, 'Rodina ' . get_the_title($rodina_id) . ' se odhlásila.');
                 $zprava = "<p style='color:orange;'>Byli jste odhlášeni z brigády.</p>";
             }
+
+            // Sponzorský dar k členskému příspěvku
+            if (isset($_POST['sb_ulozit_dar'])) {
+                $rok_daru = intval($_POST['sb_dar_rok'] ?? 0);
+                if (sb_prispevek_aktivni($rok_daru) && sb_prispevek_rodiny($rodina, $rok_daru)) {
+                    $dar = max(0, min(1000000, intval($_POST['sb_dar'] ?? 0)));
+                    if ($dar > 0) {
+                        update_post_meta($rodina_id, 'sb_dar_' . $rok_daru, $dar);
+                        $zprava = "<p style='color:green;'>Děkujeme! Dar " . esc_html(sb_kc($dar)) . " byl přidán k příspěvku, částka i QR kód se upravily.</p>";
+                    } else {
+                        delete_post_meta($rodina_id, 'sb_dar_' . $rok_daru);
+                        $zprava = "<p style='color:green;'>Dar byl z příspěvku odebrán.</p>";
+                    }
+                }
+            }
         }
     }
 
@@ -3318,6 +4202,28 @@ function sb_moje_brigady_shortcode() {
     }
 
     echo "</div>";
+
+    // --- Členský příspěvek (jen v období nastaveném správcem) ---
+    foreach ([intval(wp_date('Y')), intval(wp_date('Y')) + 1] as $rok_prisp) {
+        if (!sb_prispevek_aktivni($rok_prisp)) continue;
+        $info_prisp = sb_prispevek_rodiny($rodina, $rok_prisp);
+        if (!$info_prisp) continue;
+        $spd = sb_platba_spd($info_prisp);
+        echo "<h5 class='sbf-col-title' style='margin:4px 0 10px;'>💳 Členský příspěvek " . intval($rok_prisp) . "</h5>";
+        echo "<div style='border:1px solid #b0d4ea; border-radius:4px; padding:12px 14px; background:#f0f8ff; margin-bottom:20px; max-width:100%; box-sizing:border-box;'>";
+        echo sb_prispevek_html($info_prisp, $spd ? sb_qr_svg($spd, 180) : '');
+        if ($info_prisp['stav'] !== 'zaplaceno') {
+            echo "<p style='font-size:13px; margin:14px 0 6px;'>Pokud vám to přijde smysluplné a váš rodinný rozpočet to dovolí, můžete nás podpořit i formou sponzorského daru – částku stačí k příspěvku jednoduše přidat. Na dar vám rádi vystavíme potvrzení.</p>";
+            echo "<form method='post' class='sbf-form'>";
+            wp_nonce_field('sb_moje_brigady', '_wpnonce_sb_moje_brigady');
+            echo "<input type='hidden' name='sb_dar_rok' value='" . intval($rok_prisp) . "'>";
+            echo "<label for='sb-dar'>Dar (Kč):</label>";
+            echo "<input type='number' id='sb-dar' name='sb_dar' min='0' step='1' value='" . ($info_prisp['dar'] > 0 ? intval($info_prisp['dar']) : '') . "' placeholder='0' style='width:100px !important; max-width:100px !important;'>";
+            echo "<input type='submit' name='sb_ulozit_dar' value='" . ($info_prisp['dar'] > 0 ? 'Změnit dar a přepočítat' : 'Přidat dar a přepočítat') . "' class='sbf-btn sbf-btn-blue'>";
+            echo "</form>";
+        }
+        echo "</div>";
+    }
 
     // --- Tři sloupce ---
     echo "<div class='sbf-cols'>";
