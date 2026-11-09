@@ -10,6 +10,7 @@ $_SERVER['REQUEST_METHOD'] = 'GET';
 $GLOBALS['posts'] = []; $GLOBALS['meta'] = []; $GLOBALS['opts'] = []; $GLOBALS['users'] = [];
 $GLOBALS['roles'] = ['author']; $GLOBALS['user_id'] = 0; $GLOBALS['logged'] = false;
 $GLOBALS['hooks'] = []; $GLOBALS['deleted'] = []; $GLOBALS['maily'] = [];
+$GLOBALS['sb_test_bez_cache'] = true; // testy mění brigády mezi scénáři
 
 function add_action($h, $cb, $pr = 10, $n = 1) { $GLOBALS['hooks'][$h][] = $cb; }
 function remove_action($h, $cb) { foreach (($GLOBALS['hooks'][$h] ?? []) as $i => $c) if ($c === $cb) unset($GLOBALS['hooks'][$h][$i]); }
