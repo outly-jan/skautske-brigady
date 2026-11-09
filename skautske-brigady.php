@@ -874,25 +874,51 @@ function sb_prispevek_rodiny($rodina, $rok) {
         'rok' => $rok, 'deti' => $deti, 'za_dite' => $za_dite, 'zaklad' => $zaklad,
         'brigady' => $brigady, 'dar' => $dar, 'celkem' => $celkem,
         'platby' => $platby, 'zaplaceno' => $zaplaceno, 'zbyva' => sb_castka(max(0, $celkem - $zaplaceno)),
-        'stav' => $stav, 'jmena' => sb_deti_jmena_pro_rok($rodina->ID, $rok),
+        'stav' => $stav, 'jmena' => sb_deti_jmena_pro_rok($rodina->ID, $rok), 'rodina' => $rodina->post_title,
         'ucet' => (string) ($nast['ucet'] ?? ''),
     ];
 }
 
-// Zpráva pro příjemce: „Poplatek 2027 Jména dětí + dar 500". Pro QR bez diakritiky, max. 60 znaků.
+// Zpráva pro příjemce, např. „Poplatek 2027 Outlý Matěj, Outlá Nela, dar 500" (bez přezdívek).
+// Musí se vejít do 60 znaků QR Platby bez diakritiky, a přitom obsahovat každé dítě:
+// 1) plná jména, 2) příjmení rodiny + křestní jména, 3) totéž bez roku, 4) nouzově zkrátit.
+// Na webu a v e-mailu se zobrazí stejná varianta jako v QR kódu, jen s diakritikou.
 function sb_platba_zprava($info, $pro_qr = false) {
-    $jmena  = $info['jmena'];
-    $dovetek = $info['dar'] > 0 ? ' + dar ' . intval($info['dar']) : '';
-    if (!$pro_qr) {
-        return trim('Poplatek ' . $info['rok'] . ' ' . implode(', ', $jmena)) . $dovetek;
+    $rok    = intval($info['rok']);
+    $plna   = array_map(function($j) { return trim(preg_replace('/\s*\([^)]*\)/u', '', (string) $j)); }, $info['jmena']);
+    $plna   = array_values(array_filter($plna, 'strlen'));
+    // Křestní jméno: odstraní se příjmení společné všem dětem (např. „Godoy Očkay"),
+    // jinak první slovo (příjmení se u sourozenců liší tvarem: Outlý / Outlá).
+    $slova = array_map(function($j) { return preg_split('/\s+/u', $j); }, $plna);
+    $spolecne = 0;
+    if (count($slova) > 1) {
+        while (true) {
+            $s = $slova[0][$spolecne] ?? null;
+            if ($s === null) break;
+            foreach ($slova as $w) if (($w[$spolecne] ?? null) !== $s || count($w) <= $spolecne + 1) break 2;
+            $spolecne++;
+        }
     }
-    $jmena_txt = sb_ascii(implode(', ', $jmena));
-    $plna = 'Poplatek ' . $info['rok'] . ' ' . $jmena_txt;
-    if (strlen($plna . $dovetek) <= 60) return trim($plna) . $dovetek;
-    $zacatek = 'Poplatek ' . $info['rok'] . ' ';
-    $volno = 60 - strlen($zacatek) - strlen($dovetek);
-    $zkr = rtrim(substr($jmena_txt, 0, max(0, $volno)), ' ,');
-    return trim($zacatek . $zkr) . $dovetek;
+    $krestni = array_map(function($w) use ($spolecne) {
+        $zbytek = array_slice($w, $spolecne > 0 ? $spolecne : (count($w) > 1 ? 1 : 0));
+        return $zbytek ? $zbytek[0] : end($w);
+    }, $slova);
+    $rodina = trim((string) ($info['rodina'] ?? ''));
+    $dar    = $info['dar'] > 0 ? ', dar ' . intval($info['dar']) : '';
+    $k_txt  = implode(', ', $krestni);
+    $kandidati = ['Poplatek ' . $rok . ' ' . implode(', ', $plna) . $dar];
+    if ($rodina !== '') $kandidati[] = 'Poplatek ' . $rok . ' ' . $rodina . ': ' . $k_txt . $dar;
+    $kandidati[] = 'Poplatek ' . $rok . ' ' . $k_txt . $dar;
+    if ($rodina !== '') $kandidati[] = 'Poplatek ' . $rodina . ': ' . $k_txt . $dar;
+    $kandidati[] = 'Poplatek ' . $k_txt . $dar;
+    foreach ($kandidati as $k) {
+        $k = trim($k);
+        if (strlen(sb_ascii($k)) <= 60) return $pro_qr ? sb_ascii($k) : $k;
+    }
+    // Nouzově: poslední varianta zkrácená tak, aby zůstal dovětek s darem
+    $posledni = sb_ascii(end($kandidati));
+    $bez_daru = $dar !== '' ? substr($posledni, 0, strlen($posledni) - strlen($dar)) : $posledni;
+    return rtrim(substr($bez_daru, 0, 60 - strlen($dar)), ' ,:') . $dar;
 }
 
 // Řetězec QR Platby (SPD) na zbývající částku, nebo '' (zaplaceno / chybí účet).
@@ -926,8 +952,8 @@ function sb_moje_brigady_url() {
 // Rozpis příspěvku jako HTML tabulka (web i e-mail). $qr_html = obrázek QR (SVG nebo <img>).
 function sb_prispevek_html($info, $qr_html, $pro_email = false) {
     $rok = intval($info['rok']);
-    $td  = "style='padding:3px 14px 3px 0; color:#555; vertical-align:top;'";
-    $tdv = "style='padding:3px 0; vertical-align:top;'";
+    $td  = "style='padding:6px 18px 6px 8px; color:#555; vertical-align:top;'";
+    $tdv = "style='padding:6px 8px; vertical-align:top;'";
     $h  = "<table style='border-collapse:collapse; font-size:14px; line-height:1.5;'>";
     $h .= "<tr><td $td>Příspěvek za děti:</td><td $tdv>" . intval($info['deti']) . " × " . sb_kc($info['za_dite']) . " = <strong>" . sb_kc($info['zaklad']) . "</strong></td></tr>";
     $b = $info['brigady'];

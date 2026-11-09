@@ -128,12 +128,12 @@ ok(sb_platba_zprava($i) === 'Poplatek 2027 Nováková Klára, Novák Tomáš', '
 ok(sb_platba_zprava($i, true) === 'Poplatek 2027 Novakova Klara, Novak Tomas', 'zpráva v QR bez diakritiky');
 update_post_meta(100, 'sb_dar_2027', 500);
 $i = sb_prispevek_rodiny(get_post(100), 2027);
-ok($i['celkem'] === 2900 && sb_platba_zprava($i) === 'Poplatek 2027 Nováková Klára, Novák Tomáš + dar 500', 'dar se přičte a zpráva má dovětek „+ dar 500"');
-ok(sb_platba_spd($i) === 'SPD*1.0*ACC:CZ1020100000002300221146*AM:2900.00*CC:CZK*MSG:Poplatek 2027 Novakova Klara, Novak Tomas + dar 500', 'řetězec QR Platby');
+ok($i['celkem'] === 2900 && sb_platba_zprava($i) === 'Poplatek 2027 Nováková Klára, Novák Tomáš, dar 500', 'dar se přičte a zpráva má dovětek „, dar 500"');
+ok(sb_platba_spd($i) === 'SPD*1.0*ACC:CZ1020100000002300221146*AM:2900.00*CC:CZK*MSG:Poplatek 2027 Novakova Klara, Novak Tomas, dar 500', 'řetězec QR Platby');
 update_post_meta(100, 'deti_rodiny', [['jmeno' => 'Nováková Kateřina Anežka (Kačenka)', 'oddil' => 'Skauti'], ['jmeno' => 'Novák Tomáš Bartoloměj (Bartík)', 'oddil' => 'Skauti'], ['jmeno' => 'Nováková Žofie Marie (Žofka)', 'oddil' => 'Skauti']]);
 $i = sb_prispevek_rodiny(get_post(100), 2027);
 $q = sb_platba_zprava($i, true);
-ok(strlen($q) <= 60 && substr($q, -10) === ' + dar 500' && strpos($q, 'Poplatek') === 0, 'dlouhá jména: zpráva v QR zkrácena na 60 znaků, dovětek s darem zůstane');
+ok(strlen($q) <= 60 && substr($q, -9) === ', dar 500' && strpos($q, 'Poplatek') === 0, 'dlouhá jména: zpráva v QR zkrácena na 60 znaků, dovětek s darem zůstane');
 update_post_meta(100, 'deti_rodiny', [['jmeno' => 'Nováková Klára', 'oddil' => 'Lišky (světlušky)'], ['jmeno' => 'Novák Tomáš', 'oddil' => 'Skauti']]);
 delete_post_meta(100, 'sb_dar_2027');
 ok(strpos(sb_qr_svg('SPD*1.0*ACC:CZ1020100000002300221146*AM:1.00*CC:CZK'), '<svg') === 0, 'QR jako SVG');
@@ -208,7 +208,7 @@ ok(strpos($h, 'Členský příspěvek 2027') !== false && strpos($h, '<svg') !==
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = ['_wpnonce_sb_moje_brigady' => 'tok', 'sb_ulozit_dar' => '1', 'sb_dar_rok' => '2027', 'sb_dar' => '300'];
 $h = sb_moje_brigady_shortcode();
-ok(intval(get_post_meta(100, 'sb_dar_2027')) === 300 && strpos($h, '2 700 Kč') !== false && strpos($h, '+ dar 300') !== false, 'zadaný dar se uloží, přičte do rozpisu i zprávy');
+ok(intval(get_post_meta(100, 'sb_dar_2027')) === 300 && strpos($h, '2 700 Kč') !== false && strpos($h, ', dar 300') !== false, 'zadaný dar se uloží, přičte do rozpisu i zprávy');
 $_POST = ['_wpnonce_sb_moje_brigady' => 'tok', 'sb_ulozit_dar' => '1', 'sb_dar_rok' => '2027', 'sb_dar' => '0'];
 sb_moje_brigady_shortcode();
 ok(get_post_meta(100, 'sb_dar_2027') === '', 'dar 0 = dar odebrán');
@@ -255,7 +255,7 @@ ok(!empty($m1[1]) && $m1[1] !== $m2[1], 'každé zobrazení formuláře má novo
 update_post_meta(100, 'deti_rodiny', [['jmeno' => 'Nováková Kateřina Anežka (Kačenka)', 'oddil' => 'Skauti'], ['jmeno' => 'Novák Tomáš Bartoloměj (Bartík)', 'oddil' => 'Skauti']]);
 update_post_meta(100, 'sb_dar_2027', 500);
 $q = sb_platba_zprava(sb_prispevek_rodiny(get_post(100), 2027), true);
-ok(strpos($q, 'Poplatek 2027 ') === 0 && strlen($q) <= 60 && substr($q, -10) === ' + dar 500', 'zkrácená zpráva v QR si ponechá rok: ' . $q);
+ok(strpos($q, 'Poplatek 2027 ') === 0 && strlen($q) <= 60 && substr($q, -9) === ', dar 500', 'zkrácená zpráva v QR si ponechá rok: ' . $q);
 delete_post_meta(100, 'sb_dar_2027');
 update_option('pozadavky_dle_roku', [2026 => ['1' => 16, '2' => 20, '3' => 24, 'sazba' => 37.5]]);
 brigada(801, '2026-06-01', 100, 1, 17);   // chybí 3 h × 37,50
@@ -280,6 +280,17 @@ update_post_meta(100, 'sb_dar_2027', 300); update_post_meta(100, 'sb_platby_2027
 $h = sb_moje_brigady_shortcode();
 ok(intval(get_post_meta(100, 'sb_dar_2027')) === 300 && strpos($h, 'už uhrazený') !== false, 'po úplném zaplacení nejde dar změnit ani odebrat');
 $_SERVER['REQUEST_METHOD'] = 'GET'; $_POST = [];
+
+echo "== 11. Zpráva pro příjemce: přezdívky, čárka, celá jména ==\n";
+$b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Outlí', 'jmena' => ['Outlý Matěj (Uhlík)', 'Outlá Nela (Klíček)']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Outlý Matěj, Outlá Nela, dar 500', 'přezdívky se vynechají, dar oddělen čárkou');
+ok(strpos(sb_platba_zprava($b, true), '+') === false, 've zprávě v QR není znak „+"');
+$b = ['rok' => 2027, 'dar' => 1000, 'rodina' => 'Godoyovi Očkayovi', 'jmena' => ['Godoy Očkay Sebastián (Sebík)', 'Godoy Očkay Valentýna Marie', 'Godoy Očkay Maximilián']];
+$q = sb_platba_zprava($b, true);
+ok(strlen($q) <= 60 && strpos($q, 'Sebastian') !== false && strpos($q, 'Valentyna') !== false && strpos($q, 'Maximilian') !== false && substr($q, -10) === ', dar 1000', 'dlouhá jména: v QR zůstane každé dítě celé (' . $q . ')');
+ok(sb_ascii(sb_platba_zprava($b)) === $q, 'zpráva na webu/v e-mailu odpovídá QR (jen s diakritikou)');
+$b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Applovi', 'jmena' => ['Applová Julie (Rákosníček)', 'Appl Josef', 'Applová Kateřina Anežka']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Kateřina, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
 
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
