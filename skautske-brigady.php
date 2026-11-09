@@ -83,7 +83,7 @@ function sb_export_rocni_vypis_csv() {
         $odpracovano += $prevod;
 
         $rozdil   = $odpracovano - $pozadavek;
-        $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
+        $poplatek = sb_rodina_vedouci($r->ID) ? 0 : max(0, $pozadavek - $odpracovano) * $sazba;
 
         $jmena = [];
         if (is_array($deti_meta)) {
@@ -820,9 +820,20 @@ function sb_deti_jmena_pro_rok($rodina_id, $rok) {
     return $jmena;
 }
 
+// Rodina vedoucího: některý z rodičů má i roli author (vedoucí) – doplatek za neodpracované brigády se neplatí.
+function sb_rodina_vedouci($rodina_id) {
+    $rodice = get_post_meta($rodina_id, 'rodice_rodiny', true);
+    if (!is_array($rodice)) return false;
+    foreach ($rodice as $uid) {
+        $u = get_userdata(intval($uid));
+        if ($u && in_array('author', (array) ($u->roles ?? []), true)) return true;
+    }
+    return false;
+}
+
 // Brigádnický poplatek rodiny za rok (stejný výpočet jako Roční výpis).
 function sb_brigadni_poplatek($rodina, $rok) {
-    $vysl = ['pozadavek' => 0, 'odpracovano' => 0, 'chybi' => 0, 'sazba' => 0, 'castka' => 0, 'v_roce' => false];
+    $vysl = ['pozadavek' => 0, 'odpracovano' => 0, 'chybi' => 0, 'sazba' => 0, 'castka' => 0, 'v_roce' => false, 'vedouci' => false];
     if (!sb_rodina_v_roce($rodina, $rok)) return $vysl;
     $vysl['v_roce'] = true;
     $pozadavky = get_option('pozadavky_dle_roku', []);
@@ -838,7 +849,8 @@ function sb_brigadni_poplatek($rodina, $rok) {
     $vysl['odpracovano'] = $odpr;
     $vysl['chybi']       = max(0, $poz - $odpr);
     $vysl['sazba']       = floatval($p['sazba'] ?? 0);
-    $vysl['castka']      = sb_castka($vysl['chybi'] * $vysl['sazba']);
+    $vysl['vedouci']     = sb_rodina_vedouci($rodina->ID);
+    $vysl['castka']      = $vysl['vedouci'] ? 0 : sb_castka($vysl['chybi'] * $vysl['sazba']);
     return $vysl;
 }
 
@@ -958,7 +970,9 @@ function sb_prispevek_html($info, $qr_html, $pro_email = false) {
     $h .= "<tr><td $td>Příspěvek za děti:</td><td $tdv>" . intval($info['deti']) . " × " . sb_kc($info['za_dite']) . " = <strong>" . sb_kc($info['zaklad']) . "</strong></td></tr>";
     $b = $info['brigady'];
     if ($b['v_roce'] && $b['pozadavek'] > 0) {
-        if ($b['castka'] > 0) {
+        if ($b['vedouci'] && $b['chybi'] > 0) {
+            $h .= "<tr><td $td>Doplatek za brigády " . ($rok - 1) . ":</td><td $tdv><strong>0 Kč</strong> – rodina vedoucího, bez doplatku</td></tr>";
+        } elseif ($b['castka'] > 0) {
             $h .= "<tr><td $td>Doplatek za brigády " . ($rok - 1) . ":</td><td $tdv>" . intval($b['chybi']) . " h z " . intval($b['pozadavek']) . " h neodpracováno × " . sb_kc($b['sazba']) . " = <strong>" . sb_kc($b['castka']) . "</strong></td></tr>";
         } else {
             $h .= "<tr><td $td>Doplatek za brigády " . ($rok - 1) . ":</td><td $tdv><strong>0 Kč</strong> – brigády splněny, děkujeme!</td></tr>";
@@ -1742,6 +1756,7 @@ if (array_intersect($roles, $allowed_limited)) {
                 <ul>
                     <li>V <em>Nastavit požadavky dle roku</em> vyber rok (např. 2027) a v kartě <strong>Členský příspěvek</strong> vyplň částku za dítě při 1, 2 a 3+ dětech v rodině, číslo účtu a období, kdy se příspěvek rodičům zobrazí (od – do)</li>
                     <li>Příspěvek rodiny = počet dětí × částka + doplatek za neodpracované brigádní hodiny předchozího roku (jednou za rodinu). Rodiny v archivu neplatí nic</li>
+                    <li><strong>Rodina vedoucího</strong> (některý z rodičů má i roli author) doplatek za neodpracované brigády neplatí – hodiny se jí zobrazují normálně, poplatek je 0 (i v Ročním výpisu a v Moje brigády)</li>
                     <li>Rodiče v nastaveném období vidí v <strong>Moje brigády</strong> rozpis, platební údaje a QR kód; mohou přidat sponzorský dar (připočte se k částce i do QR kódu)</li>
                     <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em> a souhrn (příspěvky za děti, doplatky za brigády, dary, celkem, uhrazeno, zbývá). Platbu zapíšeš zaškrtnutím <strong>uhrazeno</strong> (zapíše se celá částka), nebo <strong>částečně uhrazeno</strong> a vyplněním přijaté částky; u splátek <strong>doplaceno</strong> (zbytek) nebo <strong>další splátka</strong>. Nakonec <strong>Uložit platby</strong>. Zapsanou platbu opravíš přepsáním čísla v poli, smazáním čísla ji odebereš. Vedoucí platby vidí, zapisuje jen správce</li>
                     <li>Tamtéž <strong>rozeslání e-mailů</strong>: nejdřív si pošli zkušební e-mail, pak zaškrtni rodiny (Označit vše / Jen nezaplacené / Jen dosud neodeslané) a odešli – posílá se po 20 rodinách na kliknutí; odpovědi chodí na info@skautchlumec.cz</li>
@@ -2708,6 +2723,7 @@ function sb_napoveda_vedouci() {
         <ul>
             <li><strong>🧮 Účastníci dle brigád</strong> – vyberte brigádu a uvidíte, kdo je přihlášený a kolik hodin odpracoval. Odtud si stáhnete <strong>prezenční listinu</strong>, <strong>Excel (CSV)</strong> a zkopírujete <strong>e-maily</strong> přihlášených rodin.</li>
             <li><strong>👪 Rodiny dle brigád</strong> – vyberte rodinu a uvidíte její brigády a kolik hodin jí ještě zbývá.</li>
+            <li><strong>Jste zároveň rodič?</strong> Rodina vedoucího doplatek za neodpracované brigády neplatí – odpracované hodiny uvidíte normálně, poplatek bude 0 Kč. Členský příspěvek za děti se platí stejně.</li>
             <li><strong>💳 Platby</strong> – přehled, které rodiny už zaplatily členský příspěvek (zaplaceno / splátky / nezaplaceno). Filtrem „Nezaplaceno + splátky“ rychle najdete rodiny, kterým je potřeba platbu připomenout. Platby zapisuje správce.</li>
             <li><strong>📊 Roční výpis</strong> – vyberte rok a uvidíte přehled všech rodin. Kliknutím na záhlaví sloupců <em>Odpracováno, Požadavek, Rozdíl, Poplatek</em> tabulku seřadíte. Výpis stáhnete tlačítkem <strong>📥 Exportovat CSV</strong> (otevře se v Excelu).</li>
         </ul>
@@ -3213,9 +3229,10 @@ function sb_rocni_vypis() {
             }
 
             $rozdil  = $odpracovano - $pozadavek;
-            $poplatek = max(0, $pozadavek - $odpracovano) * $sazba;
+            $vedouci = sb_rodina_vedouci($rodina_id);
+            $poplatek = $vedouci ? 0 : max(0, $pozadavek - $odpracovano) * $sazba;
             $celkem_poplatek += $poplatek;
-            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'prevod', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id');
+            $radky[] = compact('nazev', 'jmena_deti', 'jmena_rodicu', 'pocet_deti', 'odpracovano', 'prevod', 'pozadavek', 'rozdil', 'poplatek', 'brigady_seznam', 'rodina_id', 'vedouci');
         }
 
         // --- Agregované statistiky brigád ---
@@ -3258,6 +3275,7 @@ function sb_rocni_vypis() {
 
         $predpokladane_inkaso = 0;
         foreach ($radky as $z) {
+            if ($z['vedouci']) continue;
             $proj = $z['odpracovano'] + ($rodina_budouci_h[$z['rodina_id']] ?? 0);
             $predpokladane_inkaso += max(0, $z['pozadavek'] - $proj) * $sazba;
         }
@@ -3324,7 +3342,7 @@ function sb_rocni_vypis() {
                 <td class='center' data-v='" . intval($z['odpracovano']) . "'>" . $z['odpracovano'] . ($z['prevod'] > 0 ? "<br><small style='color:#777;'>vč. " . intval($z['prevod']) . " h z " . ($vybrany_rok - 1) . "</small>" : "") . "</td>
                 <td class='center' data-v='" . intval($z['pozadavek']) . "'>" . $z['pozadavek'] . "</td>
                 <td class='center $trida_rozdil' data-v='" . intval($z['rozdil']) . "'>" . intval($z['rozdil']) . "</td>
-                <td class='center' data-v='" . $z['poplatek'] . "'>" . number_format($z['poplatek'], 2, ',', ' ') . "</td>
+                <td class='center' data-v='" . $z['poplatek'] . "'>" . number_format($z['poplatek'], 2, ',', ' ') . ($z['vedouci'] ? "<br><small style='color:#777;'>vedoucí</small>" : "") . "</td>
                 <td class='sb-small'>$brigady_str</td>
             </tr>";
         }
@@ -4197,9 +4215,10 @@ function sb_moje_brigady_shortcode() {
 
     $prevod_aktivni = sb_prevod_hodin($rodina_obj, $rok_aktivni);
     $prevod_druhy   = $rok_druhy ? sb_prevod_hodin($rodina_obj, $rok_druhy) : 0;
+    $je_vedouci = sb_rodina_vedouci($rodina_id);
     $zbyva    = max(0, $pozadavek - $odpracovano_aktivni - $prevod_aktivni);
     $barva    = ($zbyva === 0) ? '#2e7d32' : '#d32f2f';
-    $poplatek = $zbyva * $sazba;
+    $poplatek = $je_vedouci ? 0 : $zbyva * $sazba;
 
     // --- Druhý rok ---
     $pozadavky_druhy = ($rok_druhy && isset($pozadavky_vse[$rok_druhy])) ? $pozadavky_vse[$rok_druhy] : null;
@@ -4219,7 +4238,7 @@ function sb_moje_brigady_shortcode() {
         }
         $sazba_druhy    = isset($pozadavky_druhy['sazba']) ? floatval($pozadavky_druhy['sazba']) : 0;
         $zbyva_druhy    = max(0, $pozadavek_druhy - $odpracovano_druhy - $prevod_druhy);
-        $poplatek_druhy = $zbyva_druhy * $sazba_druhy;
+        $poplatek_druhy = $je_vedouci ? 0 : $zbyva_druhy * $sazba_druhy;
     }
 
     // --- Výpis hlavičky a základních údajů ---
@@ -4284,7 +4303,7 @@ function sb_moje_brigady_shortcode() {
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zbyva) . ";'>$zbyva h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
-    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong>" . ($je_vedouci && $zbyva > 0 ? " <span style='color:#777; font-size:12px;'>(rodina vedoucího – bez doplatku)</span>" : "") . "</td></tr>";
     echo "</table></div>";
 
     if ($rok_druhy) {
@@ -4300,7 +4319,7 @@ function sb_moje_brigady_shortcode() {
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zbyva_d) . ";'>$zbyva_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
-        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong>" . ($je_vedouci && $zbyva_druhy > 0 ? " <span style='color:#777; font-size:12px;'>(rodina vedoucího – bez doplatku)</span>" : "") . "</td></tr>";
         echo "</table></div>";
     }
 
@@ -4607,8 +4626,9 @@ function sb_rodiny_dle_brigad_tab() {
 
     $prevod_aktivni = sb_prevod_hodin($vybrana_rodina_obj, $rok_aktivni);
     $prevod_druhy   = $rok_druhy ? sb_prevod_hodin($vybrana_rodina_obj, $rok_druhy) : 0;
+    $je_vedouci = sb_rodina_vedouci($vybrana_rodina_id);
     $zbyva    = max(0, $pozadavek - $odpracovano_aktivni - $prevod_aktivni);
-    $poplatek = $zbyva * $sazba;
+    $poplatek = $je_vedouci ? 0 : $zbyva * $sazba;
 
     $pozadavky_druhy = ($rok_druhy && isset($pozadavky_vse[$rok_druhy])) ? $pozadavky_vse[$rok_druhy] : null;
     $pozadavek_druhy = $sazba_druhy = $zbyva_druhy = $poplatek_druhy = 0;
@@ -4616,7 +4636,7 @@ function sb_rodiny_dle_brigad_tab() {
         $pozadavek_druhy = intval($pozadavky_druhy[min(sb_pocet_deti_pro_rok($vybrana_rodina_id, $rok_druhy), 3)] ?? 0);
         $sazba_druhy     = floatval($pozadavky_druhy['sazba'] ?? 0);
         $zbyva_druhy     = max(0, $pozadavek_druhy - $odpracovano_druhy - $prevod_druhy);
-        $poplatek_druhy  = $zbyva_druhy * $sazba_druhy;
+        $poplatek_druhy  = $je_vedouci ? 0 : $zbyva_druhy * $sazba_druhy;
     }
 
     // --- Výpis ---
@@ -4642,7 +4662,7 @@ function sb_rodiny_dle_brigad_tab() {
     echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_aktivni h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_z) . ";'>$zbyva h</strong></td></tr>";
     echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba, 0, ',', ' ') . " Kč/h</td></tr>";
-    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong></td></tr>";
+    echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek, 0, ',', ' ') . " Kč</strong>" . ($je_vedouci && $zbyva > 0 ? " <span style='color:#777; font-size:12px;'>(rodina vedoucího – bez doplatku)</span>" : "") . "</td></tr>";
     echo "</table></div>";
 
     if ($rok_druhy && $pozadavky_druhy) {
@@ -4658,7 +4678,7 @@ function sb_rodiny_dle_brigad_tab() {
         echo "<tr><td style='color:#555;'>Odpracováno:</td><td><strong>$odpracovano_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Zbývá:</td><td><strong style='color:" . esc_attr($barva_zd) . ";'>$zbyva_druhy h</strong></td></tr>";
         echo "<tr><td style='color:#555;'>Sazba:</td><td>" . number_format($sazba_druhy, 0, ',', ' ') . " Kč/h</td></tr>";
-        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong></td></tr>";
+        echo "<tr><td style='color:#555;'>Poplatek:</td><td><strong>" . number_format($poplatek_druhy, 0, ',', ' ') . " Kč</strong>" . ($je_vedouci && $zbyva_druhy > 0 ? " <span style='color:#777; font-size:12px;'>(rodina vedoucího – bez doplatku)</span>" : "") . "</td></tr>";
         echo "</table></div>";
     }
     echo "</div>";

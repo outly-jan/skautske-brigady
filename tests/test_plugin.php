@@ -304,5 +304,31 @@ ok(sb_ascii(sb_platba_zprava($b)) === $q, 'zpráva na webu/v e-mailu odpovídá 
 $b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Applovi', 'jmena' => ['Applová Julie (Rákosníček)', 'Appl Josef', 'Applová Kateřina Anežka']];
 ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Kateřina, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
 
+echo "== 12. Rodina vedoucího bez doplatku za brigády ==\n";
+reset_data();
+update_option('pozadavky_dle_roku', [2026 => ['1' => 16, '2' => 20, '3' => 24, 'sazba' => 50]]);
+update_option('sb_prispevky', [2027 => ['1' => 1200, '2' => 1100, '3' => 1000, 'ucet' => '2300221146/2010', 'od' => date('Y-m-d', strtotime('-1 day')), 'do' => date('Y-m-d', strtotime('+30 days'))]]);
+brigada(801, '2026-06-01', 100, 2, 8);   // Novákovi 16 z 20 h
+brigada(802, '2026-06-02', 200, 1, 10);  // Svobodovi 10 z 16 h
+$GLOBALS['users'][12]->roles = ['rodic', 'author'];   // Petr Novák je i vedoucí
+ok(sb_rodina_vedouci(100) && !sb_rodina_vedouci(200), 'rodina s rodičem-vedoucím se pozná');
+$i = sb_prispevek_rodiny(get_post(100), 2027);
+ok($i['brigady']['chybi'] === 4 && $i['brigady']['castka'] === 0 && $i['celkem'] === 2200, 'příspěvek 2027: hodiny se počítají (chybí 4 h), doplatek 0, platí jen 2 × 1 100 Kč');
+ok(strpos(sb_prispevek_html($i, ''), 'rodina vedoucího, bez doplatku') !== false, 'v rozpisu je vysvětlení „rodina vedoucího, bez doplatku"');
+$s = sb_prispevek_rodiny(get_post(200), 2027);
+ok($s['brigady']['castka'] === 300 && $s['celkem'] === 1500, 'ostatní rodiny doplatek platí dál (6 h × 50 = 300 Kč)');
+$GLOBALS['roles'] = ['administrator'];
+$_POST = ['zobraz_rocni_vypis' => '1', 'vybrany_rok' => '2026'];
+$h = sb_rocni_vypis();
+$rn = substr($h, strpos($h, '<td>Novákovi</td>'), 1200);
+ok(strpos($rn, "data-v='16'>16") !== false && strpos($rn, "data-v='0'>0,00<br><small style='color:#777;'>vedoucí</small>") !== false, 'Roční výpis: skutečné hodiny (16) a poplatek 0 s poznámkou „vedoucí"');
+$rs = substr($h, strpos($h, '<td>Svobodovi</td>'), 1200);
+ok(strpos($rs, "data-v='300'>300,00") !== false, 'Roční výpis: ostatní rodina má poplatek 300 Kč');
+ok(strpos($h, 'Celkem k inkasu: <strong>300,00 Kč') !== false, 'souhrn inkasa nezapočítává rodinu vedoucího');
+$GLOBALS['roles'] = ['rodic']; $GLOBALS['user_id'] = 11; $GLOBALS['logged'] = true; $_POST = [];
+$h = sb_moje_brigady_shortcode();
+$GLOBALS['logged'] = false; $GLOBALS['user_id'] = 0;
+ok(strpos($h, 'Odpracováno:</td><td><strong>16 h') !== false && strpos($h, 'Poplatek:</td><td><strong>0 Kč</strong> <span') !== false && strpos($h, 'rodina vedoucího – bez doplatku') !== false, 'Moje brigády: hodiny 16, poplatek 0 Kč s vysvětlením');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
