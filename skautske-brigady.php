@@ -1126,11 +1126,6 @@ function sb_platby_tab() {
                     $c = sb_castka($c);
                     if ($c > 0) $nove[] = $c;
                 }
-                if (!empty($_POST['cele'][$id])) {
-                    $info = sb_prispevek_rodiny($r, $rok);
-                    $zbytek = $info ? sb_castka($info['celkem'] - array_sum($nove)) : 0;
-                    if ($zbytek > 0) $nove[] = $zbytek;
-                }
                 if ($nove !== sb_platby($id, $rok)) {
                     $zmen++;
                     if ($nove) update_post_meta($id, 'sb_platby_' . $rok, $nove);
@@ -1223,8 +1218,11 @@ function sb_platby_tab() {
     }
 
     $seznam = sb_platici_rodiny($rok);
-    $suma = ['celkem' => 0, 'zaplaceno' => 0, 'zbyva' => 0, 'zaplaceno_n' => 0, 'splatky_n' => 0, 'nezaplaceno_n' => 0];
+    $suma = ['zaklad' => 0, 'brigady' => 0, 'dar' => 0, 'celkem' => 0, 'zaplaceno' => 0, 'zbyva' => 0, 'zaplaceno_n' => 0, 'splatky_n' => 0, 'nezaplaceno_n' => 0];
     foreach ($seznam as $z) {
+        $suma['zaklad'] += $z['info']['zaklad'];
+        $suma['brigady'] += $z['info']['brigady']['castka'];
+        $suma['dar'] += $z['info']['dar'];
         $suma['celkem'] += $z['info']['celkem'];
         $suma['zaplaceno'] += $z['info']['zaplaceno'];
         $suma['zbyva'] += $z['info']['zbyva'];
@@ -1232,11 +1230,18 @@ function sb_platby_tab() {
     }
     $nast = sb_prispevek_nastaveni($rok);
     echo "<div class='sb-card'>";
-    echo "<div style='display:flex; flex-wrap:wrap; gap:18px; font-size:14px;'>";
-    echo "<div>Platících rodin: <strong>" . count($seznam) . "</strong></div>";
-    echo "<div>Celkem k úhradě: <strong>" . sb_kc($suma['celkem']) . "</strong></div>";
-    echo "<div>Uhrazeno: <strong>" . sb_kc($suma['zaplaceno']) . "</strong></div>";
-    echo "<div>Zbývá: <strong>" . sb_kc($suma['zbyva']) . "</strong></div>";
+    $polozka = function($popis, $castka, $tucne = false) {
+        return "<div style='white-space:nowrap;'>" . $popis . ": " . ($tucne ? "<strong style='font-size:15px;'>" : "<strong>") . sb_kc($castka) . "</strong></div>";
+    };
+    echo "<div style='font-size:14px; margin-bottom:6px;'>Platících rodin: <strong>" . count($seznam) . "</strong></div>";
+    echo "<div style='display:flex; flex-wrap:wrap; gap:6px 22px; font-size:14px;'>";
+    echo $polozka('Příspěvky za děti', $suma['zaklad']);
+    echo $polozka('Doplatky za brigády ' . ($rok - 1), $suma['brigady']);
+    if ($suma['dar'] > 0) echo $polozka('Dary', $suma['dar']);
+    echo $polozka('Celkem k úhradě', $suma['celkem'], true);
+    echo "</div><div style='display:flex; flex-wrap:wrap; gap:6px 22px; font-size:14px; margin-top:6px;'>";
+    echo $polozka('Uhrazeno', $suma['zaplaceno']);
+    echo $polozka('Zbývá', $suma['zbyva']);
     echo "</div><div style='margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px;'>";
     echo sb_stav_platby_html('zaplaceno') . " " . $suma['zaplaceno_n'] . " &nbsp; " . sb_stav_platby_html('splatky') . " " . $suma['splatky_n'] . " &nbsp; " . sb_stav_platby_html('nezaplaceno') . " " . $suma['nezaplaceno_n'];
     echo "</div>";
@@ -1248,7 +1253,7 @@ function sb_platby_tab() {
     // Filtr
     echo "<div class='sb-card'><div class='sb-form-row'>";
     echo "<input type='text' id='sb-platby-hledat' placeholder='🔍 Hledat rodinu nebo dítě…' autocomplete='off' style='flex:1 1 220px; max-width:360px;'>";
-    echo "<select id='sb-platby-stav'><option value=''>Všechny stavy</option><option value='nezaplaceno'>Nezaplaceno</option><option value='splatky'>Splátky</option><option value='zaplaceno'>Zaplaceno</option><option value='nedoplaceno'>Nezaplaceno + splátky</option></select>";
+    echo "<select id='sb-platby-stav' style='width:auto; max-width:260px;'><option value=''>Všechny stavy</option><option value='nezaplaceno'>Nezaplaceno</option><option value='splatky'>Splátky</option><option value='zaplaceno'>Zaplaceno</option><option value='nedoplaceno'>Nezaplaceno + splátky</option></select>";
     echo "</div></div>";
 
     if ($je_spravce) {
@@ -1257,6 +1262,7 @@ function sb_platby_tab() {
         echo "<input type='hidden' name='sb_platby_rok' value='" . intval($rok) . "'>";
         echo "<div class='sb-btn-row' style='margin:0 0 8px;'><input type='submit' name='sb_platby_ulozit' value='💾 Uložit platby' class='sb-btn sb-btn-primary'></div>";
     }
+    echo "<style>#sb-platby-tabulka td.center { white-space:nowrap; }</style>";
     echo "<div style='overflow-x:auto; max-width:100%;'><table class='sb-table' id='sb-platby-tabulka' style='min-width:640px;'>";
     echo "<thead><tr><th>Rodina</th><th class='center'>Příspěvek</th><th class='center'>Doplatek " . ($rok - 1) . "</th><th class='center'>Dar</th><th class='center'>Celkem</th><th>" . ($je_spravce ? 'Platby (Kč)' : 'Splátky') . "</th><th class='center'>Zbývá</th><th class='center'>Stav</th></tr></thead><tbody>";
     foreach ($seznam as $z) {
@@ -1277,7 +1283,6 @@ function sb_platby_tab() {
             }
             if ($i['stav'] !== 'zaplaceno') {
                 echo "<input type='number' name='platby[$id][]' value='' min='0' step='0.01' placeholder='" . ($i['platby'] ? 'další' : 'částka') . "' style='width:80px;'>";
-                echo "<label style='font-size:12px; white-space:nowrap;'><input type='checkbox' name='cele[$id]' value='1'> celé</label>";
             }
             echo "</div>";
         } else {
@@ -1291,7 +1296,7 @@ function sb_platby_tab() {
     if (!$seznam) echo "<tr><td colspan='8' class='center sb-text-muted'>Žádná rodina zatím neplatí.</td></tr>";
     echo "</tbody></table></div>";
     if ($je_spravce) {
-        echo "<p class='sb-text-hint'>Zapište přijatou částku. U splátek se po uložení objeví další pole, dokud není uhrazeno celé. Zaškrtnutím „celé“ se doplní celá zbývající částka. Chybnou platbu opravíte přepsáním nebo smazáním čísla.</p>";
+        echo "<p class='sb-text-hint'>Zapište přijatou částku a uložte. Jakmile součet plateb dosáhne celkové částky (nebo ji přesáhne), je rodina zaplacená; u splátek se po uložení objeví další pole. Chybnou platbu opravíte přepsáním nebo smazáním čísla.</p>";
         echo "<div class='sb-btn-row'><input type='submit' name='sb_platby_ulozit' value='💾 Uložit platby' class='sb-btn sb-btn-primary'></div>";
         echo "</form>";
     } else {
@@ -1718,7 +1723,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li>V <em>Nastavit požadavky dle roku</em> vyber rok (např. 2027) a v kartě <strong>Členský příspěvek</strong> vyplň částku za dítě při 1, 2 a 3+ dětech v rodině, číslo účtu a období, kdy se příspěvek rodičům zobrazí (od – do)</li>
                     <li>Příspěvek rodiny = počet dětí × částka + doplatek za neodpracované brigádní hodiny předchozího roku (jednou za rodinu). Rodiny v archivu neplatí nic</li>
                     <li>Rodiče v nastaveném období vidí v <strong>Moje brigády</strong> rozpis, platební údaje a QR kód; mohou přidat sponzorský dar (připočte se k částce i do QR kódu)</li>
-                    <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em>; přijatou částku zapiš do pole a ulož (u splátek naskočí další pole, „celé“ doplní celý zbytek). Vedoucí platby vidí, zapisuje jen správce</li>
+                    <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em>; přijatou částku zapiš do pole a ulož (jakmile součet dosáhne celkové částky, je zaplaceno; u splátek naskočí další pole). Vedoucí platby vidí, zapisuje jen správce</li>
                     <li>Tamtéž <strong>rozeslání e-mailů</strong>: nejdřív si pošli zkušební e-mail, pak zaškrtni rodiny (Označit vše / Jen nezaplacené / Jen dosud neodeslané) a odešli – posílá se po 20 rodinách na kliknutí; odpovědi chodí na info@skautchlumec.cz</li>
                     <li>Rodina, jejíž rodiče ještě nemají účet na webu, e-mail dostat nemůže – po založení účtu jí ho stačí doposlat</li>
                 </ul>

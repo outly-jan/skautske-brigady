@@ -152,13 +152,14 @@ ok(strpos(sb_prispevek_html($i, ''), 'Uhrazeno – děkujeme') !== false, 'rodin
 delete_post_meta(100, 'sb_platby_2027');
 
 $GLOBALS['roles'] = ['administrator'];
-$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100', '200'], 'platby' => ['100' => ['1000', ''], '200' => ['']], 'cele' => ['200' => '1']];
+$_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100', '200'], 'platby' => ['100' => ['1000', ''], '200' => ['3500']]];
 $h = sb_platby_tab();
-ok(sb_platby(100, 2027) === [1000] && sb_platby(200, 2027) === [sb_prispevek_rodiny(get_post(200), 2027)['celkem']] && sb_platby(200, 2027) === [3200], 'uložení: splátka 1 000 Kč a „celé" doplní celou částku (3 × 1 000 + doplatek 4 h × 50 = 3 200 Kč)');
+ok(sb_platby(100, 2027) === [1000] && sb_platby(200, 2027) === [3500] && sb_prispevek_rodiny(get_post(200), 2027)['stav'] === 'zaplaceno', 'uložení: splátka 1 000 Kč; platba 3 500 Kč ≥ 3 200 Kč = automaticky zaplaceno');
 $_POST = ['sb_platby_rok' => '2027'];
 $h = sb_platby_tab();
 $radek = substr($h, strpos($h, "data-hledat='novákovi"), 2000);
-ok(substr_count($radek, "name='platby[100][]'") === 2, 'u splátek naskočí další pole pro částku');
+ok(substr_count($radek, "name='platby[100][]'") === 2 && strpos($h, "name='cele[") === false, 'u splátek naskočí další pole pro částku (bez zaškrtávátka „celé")');
+ok(strpos($h, 'Příspěvky za děti: <strong>') !== false && strpos($h, 'Doplatky za brigády 2026: <strong>') !== false && strpos($h, 'Celkem k úhradě') !== false, 'souhrn odděluje příspěvky, doplatky za brigády a celkovou částku');
 $radek2 = substr($h, strpos($h, "data-hledat='svobodovi"), 2000);
 ok(substr_count($radek2, "name='platby[200][]'") === 1 && strpos($radek2, 'Zaplaceno') !== false, 'u uhrazené rodiny už další pole není');
 $_POST = ['sb_platby_rok' => '2027', 'sb_platby_ulozit' => '1', '_wpnonce_platby' => 'tok', 'sb_platby_rodiny' => ['100'], 'platby' => ['100' => ['', '']]];
