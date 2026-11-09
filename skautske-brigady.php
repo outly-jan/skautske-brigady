@@ -1589,6 +1589,8 @@ if (array_intersect($roles, $allowed_limited)) {
             .sb-menu-horizontal button.sb-active { border-color: #0073aa; }
             .sb-content { border-top: 1px solid #0073aa; }
             .sb-btn-row { flex-direction: column; align-items: flex-start; }
+            .sb-content { padding: 14px 10px; }
+            .sb-table th, .sb-table td { padding: 5px 6px; font-size: 12px; }
             .sb-form-group input[type=text], .sb-form-group input[type=number],
             .sb-form-group input[type=date], .sb-form-group textarea, .sb-form-group select { max-width: 100%; }
         }
@@ -1926,7 +1928,7 @@ if (isset($_POST['zobraz_ucast'])) {
     echo "<div class='sb-card'>";
     echo "<h4 class='sb-card-title'>📋 " . esc_html(get_the_title($id)) . "</h4>";
     echo "<table class='sb-table' style='max-width:500px;'>";
-    echo "<tr><th style='width:220px;'>Položka</th><th>Hodnota</th></tr>";
+    echo "<tr><th>Položka</th><th>Hodnota</th></tr>";
     echo "<tr><td>📅 Datum</td><td>" . esc_html($datum ?: 'neuvedeno') . "</td></tr>";
     echo "<tr><td>⏰ Čas</td><td>" . esc_html($cas ?: 'neuvedeno') . "</td></tr>";
     echo "<tr><td>📍 Místo</td><td>" . esc_html($misto ?: 'neuvedeno') . "</td></tr>";
@@ -1951,15 +1953,15 @@ if (isset($_POST['zobraz_ucast'])) {
             'brigada_id' => $id,
             '_wpnonce'   => wp_create_nonce('sb_prezencni_listina'),
         ]);
-        echo "<div style='display:flex; justify-content:space-between; align-items:center; margin-top:20px; margin-bottom:8px;'>";
+        echo "<div style='display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; align-items:center; margin-top:20px; margin-bottom:8px;'>";
         echo "<h5 class='sb-card-title' style='margin:0;'>👥 Přehled účastníků</h5>";
-        echo "<div style='display:flex; gap:8px;'>";
+        echo "<div style='display:flex; flex-wrap:wrap; gap:8px;'>";
         echo "<a href='" . esc_url($pl_url) . "' target='_blank' class='sb-btn sb-btn-secondary sb-btn-sm'>📋 Prezenční listina</a>";
         echo "<a href='" . esc_url($export_url) . "' class='sb-btn sb-btn-secondary sb-btn-sm'>📥 Stáhnout Excel (CSV)</a>";
         echo "</div>";
         echo "</div>";
-        echo "<table class='sb-table'>";
-        echo "<tr><th>Rodina / jméno</th><th class='center'>Osob</th><th class='center'>Hod./os.</th><th class='center'>Celkem odpracováno</th><th>Způsob přihlášení</th></tr>";
+        echo "<div style='overflow-x:auto; max-width:100%;'><table class='sb-table'>";
+        echo "<tr><th>Rodina / jméno</th><th class='center'>Osob</th><th class='center'>Hod./os.</th><th class='center'>Celkem</th><th>Způsob</th></tr>";
         foreach ($radky_ucastnici as $row) {
             if (!empty($row['hodiny_osob'])) {
                 $h_os_str = implode(', ', array_map(fn($h) => $h . ' h', $row['hodiny_osob']));
@@ -1970,8 +1972,8 @@ if (isset($_POST['zobraz_ucast'])) {
             }
             $celkem_str = $row['celkem_h'] !== null ? '<strong>' . $row['celkem_h'] . ' h</strong>' : '–';
             $typ_badge  = $row['typ'] === 'Walk-in'
-                ? "<span style='background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:3px;padding:1px 6px;font-size:12px;'>Walk-in</span>"
-                : "<span style='background:#d1e7dd;color:#0a5b2e;border:1px solid #a3cfbb;border-radius:3px;padding:1px 6px;font-size:12px;'>Přihlášena</span>";
+                ? "<span style='background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:3px;padding:1px 6px;font-size:12px; white-space:nowrap;'>Walk-in</span>"
+                : "<span style='background:#d1e7dd;color:#0a5b2e;border:1px solid #a3cfbb;border-radius:3px;padding:1px 6px;font-size:12px; white-space:nowrap;'>Přihlášena</span>";
             echo "<tr>";
             echo "<td>" . esc_html($row['jmeno']) . "</td>";
             echo "<td class='center'>" . intval($row['osob']) . "</td>";
@@ -1980,7 +1982,7 @@ if (isset($_POST['zobraz_ucast'])) {
             echo "<td>" . $typ_badge . "</td>";
             echo "</tr>";
         }
-        echo "</table>";
+        echo "</table></div>";
 
         // --- Mailové adresy přihlášených rodin ---
         $emails = [];
