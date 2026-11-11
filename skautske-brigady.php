@@ -1057,6 +1057,20 @@ function sb_roky_prispevku() {
     return $roky;
 }
 
+// Kontaktní e-maily rodiny zadané správcem (pro rodiny, jejichž rodiče nemají účet na webu).
+function sb_kontakt_emaily($rodina_id) {
+    $s = (string) get_post_meta($rodina_id, 'sb_kontakt_email', true);
+    $vysl = [];
+    foreach (preg_split('/[\s,;]+/', $s, -1, PREG_SPLIT_NO_EMPTY) as $e) if (is_email($e)) $vysl[] = $e;
+    return array_values(array_unique($vysl));
+}
+
+// Adresy pro e-mail s příspěvkem: e-maily z účtů rodičů, a jen když žádný nemá účet, kontaktní e-maily.
+function sb_emaily_prispevku($rodina_id) {
+    $ucty = sb_get_rodic_emails($rodina_id);
+    return $ucty ? array_values($ucty) : sb_kontakt_emaily($rodina_id);
+}
+
 // Platící rodiny pro rok: [['rodina' => WP_Post, 'info' => [...]], ...] (abecedně)
 function sb_platici_rodiny($rok) {
     $vysl = [];
@@ -1156,6 +1170,31 @@ function sb_platby_tab() {
         }
     }
 
+    // --- Kontaktní e-maily rodin bez účtu (ukládají se i při odeslání) ---
+    if ((isset($_POST['sb_kontakt_ulozit']) || isset($_POST['sb_mail_odeslat'])) && isset($_POST['kontakt']) && is_array($_POST['kontakt'])) {
+        if (!$je_spravce || !isset($_POST['_wpnonce_platby_mail']) || !wp_verify_nonce($_POST['_wpnonce_platby_mail'], 'sb_platby_mail')) {
+            $zprava .= sb_alert('Neplatný požadavek.', 'error');
+        } else {
+            $ulozeno = 0; $spatne = [];
+            foreach ($_POST['kontakt'] as $kid => $hodnota) {
+                $r = sb_get_rodina(intval($kid));
+                if (!$r) continue;
+                $platne = [];
+                foreach (preg_split('/[\s,;]+/', sanitize_text_field(wp_unslash((string) $hodnota)), -1, PREG_SPLIT_NO_EMPTY) as $e) {
+                    if (is_email($e)) $platne[] = $e; else $spatne[] = $r->post_title . ': ' . $e;
+                }
+                $nova = implode(', ', array_unique($platne));
+                if ($nova !== (string) get_post_meta($r->ID, 'sb_kontakt_email', true)) {
+                    if ($nova !== '') update_post_meta($r->ID, 'sb_kontakt_email', $nova);
+                    else delete_post_meta($r->ID, 'sb_kontakt_email');
+                    $ulozeno++;
+                }
+            }
+            if (isset($_POST['sb_kontakt_ulozit'])) $zprava .= sb_alert($ulozeno ? 'Kontaktní e-maily byly uloženy (změněno rodin: ' . $ulozeno . ').' : 'Kontaktní e-maily beze změny.');
+            if ($spatne) $zprava .= sb_alert('Neplatné e-mailové adresy (neuloženy): ' . implode(', ', $spatne) . '.', 'error');
+        }
+    }
+
     // --- Zkušební e-mail správci ---
     if (isset($_POST['sb_mail_test'])) {
         if (!$je_spravce || !isset($_POST['_wpnonce_platby_mail']) || !wp_verify_nonce($_POST['_wpnonce_platby_mail'], 'sb_platby_mail')) {
@@ -1200,7 +1239,7 @@ function sb_platby_tab() {
                 $r = sb_get_rodina($id);
                 $info = $r ? sb_prispevek_rodiny($r, $rok) : null;
                 if (!$info) continue;
-                $adresy = sb_get_rodic_emails($id);
+                $adresy = sb_emaily_prispevku($id);
                 if (!$adresy) { $bez_emailu[] = $r->post_title; continue; }
                 if (sb_odeslat_prispevek_email($adresy, sb_prispevek_email($r, $info))) {
                     update_post_meta($id, 'sb_prispevek_mail_' . $rok, wp_date('j. n. Y H:i'));
@@ -1214,7 +1253,7 @@ function sb_platby_tab() {
                 if ($token !== '' && !in_array($token, array_slice($pouzite, 0, -1), true)) $zprava .= sb_alert('Nevybrali jste žádnou rodinu.', 'error');
             } else {
                 $zprava .= sb_alert('Odesláno rodinám: ' . count($odeslano) . '.');
-                if ($bez_emailu) $zprava .= sb_alert('Bez e-mailové adresy (rodiče nemají účet): ' . implode(', ', $bez_emailu) . '.', 'warning');
+                if ($bez_emailu) $zprava .= sb_alert('Bez e-mailové adresy (rodiče nemají účet ani kontaktní e-mail): ' . implode(', ', $bez_emailu) . '.', 'warning');
                 if ($chyby) $zprava .= sb_alert('Nepodařilo se odeslat: ' . implode(', ', $chyby) . '.', 'error');
                 if ($mail_vybrane) $zprava .= sb_alert('E-maily se posílají po ' . $davka . '. Zbývá ještě ' . count($mail_vybrane) . ' vybraných rodin – jsou zaškrtnuté níže, klikněte znovu na Odeslat.', 'info');
             }
@@ -1353,20 +1392,28 @@ function sb_platby_tab() {
         echo "<div style='overflow-x:auto;'><table class='sb-table' style='min-width:520px;'><thead><tr><th class='center'>✉</th><th>Rodina</th><th>E-maily</th><th class='center'>Stav</th><th>Naposledy odesláno</th></tr></thead><tbody>";
         foreach ($seznam as $z) {
             $id = intval($z['rodina']->ID);
-            $adresy = sb_get_rodic_emails($id);
+            $ucty = sb_get_rodic_emails($id);
+            $adresy = $ucty ?: sb_kontakt_emaily($id);
             $odeslano = get_post_meta($id, 'sb_prispevek_mail_' . $rok, true);
             $zaskrt = $mail_vybrane !== null && in_array($id, $mail_vybrane, true);
             echo "<tr>";
             echo "<td class='center'><input type='checkbox' name='sb_mail_rodiny[]' value='$id' class='sb-mail-cb' data-stav='" . esc_attr($z['info']['stav']) . "' data-odeslano='" . ($odeslano ? '1' : '0') . "'" . ($zaskrt ? ' checked' : '') . ($adresy ? '' : ' disabled') . "></td>";
             echo "<td>" . esc_html($z['rodina']->post_title) . "</td>";
-            echo "<td class='sb-small'>" . ($adresy ? esc_html(implode(', ', $adresy)) : "<em style='color:#b00;'>bez e-mailu</em>") . "</td>";
+            if ($ucty) {
+                echo "<td class='sb-small'>" . esc_html(implode(', ', $ucty)) . "</td>";
+            } else {
+                echo "<td class='sb-small'>";
+                echo "<input type='text' name='kontakt[$id]' value='" . esc_attr((string) get_post_meta($id, 'sb_kontakt_email', true)) . "' placeholder='bez účtu – zadejte e-mail' class='sb-kontakt' data-rodina='$id' style='width:100%; min-width:200px; font-size:12px;'>";
+                echo $adresy ? "<div class='sb-text-hint'>kontaktní e-mail (rodiče nemají účet)</div>" : "";
+                echo "</td>";
+            }
             echo "<td class='center'>" . sb_stav_platby_html($z['info']['stav']) . "</td>";
             echo "<td class='sb-small'>" . ($odeslano ? esc_html($odeslano) : '–') . "</td>";
             echo "</tr>";
         }
         echo "</tbody></table></div>";
-        echo "<div class='sb-btn-row'><input type='submit' name='sb_mail_odeslat' value='📧 Odeslat vybraným' class='sb-btn sb-btn-primary' onclick=\"return confirm('Odeslat e-mail s příspěvkem vybraným rodinám?');\"></div>";
-        echo "<p class='sb-text-hint'>E-maily se posílají po $davka rodinách na jedno kliknutí. Rodiny bez e-mailu (rodiče si ještě nezaložili účet) nelze vybrat – až si účet založí, stačí jim e-mail doposlat.</p>";
+        echo "<div class='sb-btn-row'><input type='submit' name='sb_mail_odeslat' value='📧 Odeslat vybraným' class='sb-btn sb-btn-primary' onclick=\"return confirm('Odeslat e-mail s příspěvkem vybraným rodinám?');\"> <input type='submit' name='sb_kontakt_ulozit' id='sb-kontakt-ulozit' value='💾 Uložit kontaktní e-maily' class='sb-btn sb-btn-secondary'></div>";
+        echo "<p class='sb-text-hint'>E-maily se posílají po $davka rodinách na jedno kliknutí. U rodin, jejichž rodiče nemají na webu účet, zadejte kontaktní e-mail (např. ze skautského informačního systému; více adres oddělte čárkou) – použije se, dokud si některý z rodičů nezaloží účet. Zadaný e-mail se uloží i při odeslání.</p>";
         echo "</form></div>";
     }
 
@@ -1381,6 +1428,17 @@ document.addEventListener('change', function(e) {
     pole.style.display = cast.checked ? '' : 'none';
     if (!cast.checked) pole.value = '';
     if (cast.checked) pole.focus();
+});
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('sb-kontakt')) {
+        e.preventDefault();
+        var b = document.getElementById('sb-kontakt-ulozit'); if (b) b.click();
+    }
+});
+document.addEventListener('input', function(e) {
+    if (!e.target.classList || !e.target.classList.contains('sb-kontakt')) return;
+    var cb = document.querySelector('.sb-mail-cb[value=\"' + parseInt(e.target.getAttribute('data-rodina'), 10) + '\"]');
+    if (cb) { cb.disabled = e.target.value.indexOf('@') < 0; if (cb.disabled) cb.checked = false; }
 });
 function sbMailVyber(co) {
     document.querySelectorAll('.sb-mail-cb').forEach(function(cb) {
@@ -1762,7 +1820,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li>Rodiče v nastaveném období vidí v <strong>Moje brigády</strong> rozpis, platební údaje a QR kód; mohou přidat sponzorský dar (připočte se k částce i do QR kódu)</li>
                     <li>Záložka <strong>Platby</strong>: přehled rodin se stavem <em>nezaplaceno / splátky / zaplaceno</em> a souhrn (příspěvky za děti, doplatky za brigády, dary, celkem, uhrazeno, zbývá). Platbu zapíšeš zaškrtnutím <strong>uhrazeno</strong> (zapíše se celá částka), nebo <strong>částečně uhrazeno</strong> a vyplněním přijaté částky; u splátek <strong>doplaceno</strong> (zbytek) nebo <strong>další splátka</strong>. Nakonec <strong>Uložit platby</strong>. Zapsanou platbu opravíš přepsáním čísla v poli, smazáním čísla ji odebereš. Vedoucí platby vidí, zapisuje jen správce</li>
                     <li>Tamtéž <strong>rozeslání e-mailů</strong>: nejdřív si pošli zkušební e-mail, pak zaškrtni rodiny (Označit vše / Jen nezaplacené / Jen dosud neodeslané) a odešli – posílá se po 20 rodinách na kliknutí; odpovědi chodí na info@skautchlumec.cz</li>
-                    <li>Rodina, jejíž rodiče ještě nemají účet na webu, e-mail dostat nemůže – po založení účtu jí ho stačí doposlat</li>
+                    <li>Rodině, jejíž rodiče nemají účet na webu, zadej v seznamu pro rozesílání <strong>kontaktní e-mail</strong> (např. ze skautského informačního systému, více adres odděl čárkou) a ulož – adresa se k rodině uloží natrvalo a použije se, dokud si některý z rodičů nezaloží účet</li>
                 </ul>
 
                 <br><br>
