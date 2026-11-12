@@ -299,10 +299,15 @@ ok(sb_platba_zprava($b) === 'Poplatek 2027 Outlý Matěj, Outlá Nela, dar 500',
 ok(strpos(sb_platba_zprava($b, true), '+') === false, 've zprávě v QR není znak „+"');
 $b = ['rok' => 2027, 'dar' => 1000, 'rodina' => 'Godoyovi Očkayovi', 'jmena' => ['Godoy Očkay Sebastián (Sebík)', 'Godoy Očkay Valentýna Marie', 'Godoy Očkay Maximilián']];
 $q = sb_platba_zprava($b, true);
-ok(strlen($q) <= 60 && strpos($q, 'Sebastian') !== false && strpos($q, 'Valentyna') !== false && strpos($q, 'Maximilian') !== false && substr($q, -10) === ', dar 1000', 'dlouhá jména: v QR zůstane každé dítě celé (' . $q . ')');
+ok(strlen($q) <= 60 && strpos($q, 'Sebastian') !== false && strpos($q, 'Marie') !== false && strpos($q, 'Maximilian') !== false && substr($q, -10) === ', dar 1000', 'dlouhá jména: v QR zůstane každé dítě celé (' . $q . ')');
 ok(sb_ascii(sb_platba_zprava($b)) === $q, 'zpráva na webu/v e-mailu odpovídá QR (jen s diakritikou)');
 $b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Applovi', 'jmena' => ['Applová Julie (Rákosníček)', 'Appl Josef', 'Applová Kateřina Anežka']];
-ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Kateřina, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Anežka, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
+$b = ['rok' => 2027, 'dar' => 0, 'rodina' => 'Testerovi', 'jmena' => ['Matěj Tester', 'Nela Testerová', 'Outlý - Tester Jan']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Testerovi: Matěj, Nela, Jan', 'pořadí „Jméno Příjmení" i dvojité příjmení s pomlčkou: ' . sb_platba_zprava($b));
+$b = ['rok' => 2027, 'dar' => 0, 'rodina' => 'Novákovi', 'jmena' => ['Nováková Svobodová Jana Marie', 'Novák Bartoloměj Tadeáš', 'Nováková Kristýna Valentýna']];
+$q = sb_platba_zprava($b, true);
+ok(strpos($q, 'Poplatek 2027 Novakovi:') === 0 && strlen($q) <= 60 && substr_count($q, ',') === 2, 'tři děti s dlouhými jmény: každé jedním křestním jménem (' . $q . ')');
 
 echo "== 12. Rodina vedoucího bez doplatku za brigády ==\n";
 reset_data();
@@ -497,6 +502,35 @@ $_POST = ['edit_rodina_id' => (string) $y, 'ulozit_rodinu' => '1', '_wpnonce_ulo
 $h = sb_prehled_rodin();
 ok(get_post_meta($y, 'deti_rodiny') === '' && strpos($h, 'nebyla nalezena') !== false, 'Správa rodin odmítne záznam dospělého člena');
 ok(strpos(sb_prispevek_email(get_post($y), ['rok' => $cil, 'je_dospely' => true, 'deti' => 0, 'dospeli' => 1, 'dospeli_jmena' => ['Samostatný Karel'], 'za_dospeleho' => 1500, 'zaklad_dospeli' => 1500, 'zaklad' => 1500, 'brigady' => ['v_roce' => false, 'pozadavek' => 0, 'castka' => 0], 'dar' => 0, 'celkem' => 1500, 'stav' => 'nezaplaceno', 'zaplaceno' => 0, 'zbyva' => 1500, 'jmena' => [], 'jmena_qr' => ['Samostatný Karel'], 'rodina' => '', 'ucet' => '2300221146/2010', 'platby' => []])['html'], '<p>Ahoj,</p>') !== false, 'e-mail dospělému začíná „Ahoj,"');
+
+echo "== 16. Admini jako vedoucí, převod rodiny bez dětí ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+update_option('sb_prispevky', [$cil => ['1' => 1200, '2' => 1100, '3' => 1000, 'dosp' => 620, 'ucet' => '2300221146/2010', 'od' => date('Y-m-d', strtotime('-1 day')), 'do' => date('Y-m-d', strtotime('+30 days'))]]);
+$GLOBALS['users'][12]->roles = ['administrator'];
+ok(sb_dospeli_pro_rok(100, $cil) === ['Novák Petr'] && sb_rodina_vedouci(100), 'admin (role vyšší než vedoucí) je dospělým členem a rodina je bez doplatku');
+post(600, 'rodina', 'Petrovičtí', '2024-01-01 10:00:00');
+user(21, 'Petra', 'Petrovická', 'petra@example.cz'); $GLOBALS['users'][21]->roles = ['rodic', 'author'];
+user(22, 'Pavlína', 'Petrovická', 'pavlina@example.cz'); $GLOBALS['users'][22]->roles = ['rodic', 'author'];
+update_post_meta(600, 'rodice_rodiny', [21, 22]);
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos(substr($h, strpos($h, "id='sb-rodina-600'"), 6000), 'Převést na dospělé členy') !== false, 'rodina bez dětí s dospělými členy má tlačítko „Převést na dospělé členy"');
+ok(strpos(substr($h, strpos($h, "id='sb-rodina-100'"), 6000), 'prevest_na_dospele') === false, 'rodina s dětmi tlačítko nemá');
+$_POST = ['edit_rodina_id' => '600', 'prevest_na_dospele' => '1', '_wpnonce_prevest' => 'tok'];
+$h = sb_prehled_rodin();
+$pa = sb_najdi_dospeleho_dle_jmena('Petrovická Petra'); $pv = sb_najdi_dospeleho_dle_jmena('Petrovická Pavlína');
+ok(sb_rodina_archiv(600)['od_roku'] === $cil && $pa && $pv && get_post_meta($pa->ID, 'rodice_rodiny') === [21] && get_post_meta($pv->ID, 'rodice_rodiny') === [22], 'převod: rodina do archivu, obě jsou samostatné dospělé členky i se svými účty');
+ok(sb_prispevek_rodiny($pa, $cil)['celkem'] === 620 && sb_prispevek_rodiny(get_post(600), $cil) === null, "od roku $cil platí každá zvlášť 620 Kč, archivovaná rodina nic");
+$_POST = ['edit_rodina_id' => '100', 'prevest_na_dospele' => '1', '_wpnonce_prevest' => 'tok'];
+$h = sb_prehled_rodin();
+ok(sb_rodina_archiv(100) === null && strpos($h, 'jen rodinu bez dětí') !== false, 'rodinu s dětmi převést nelze');
+
+$_POST = ['sb_dosp_novy' => '1', '_wpnonce_dospeli' => 'tok', 'dosp_jmeno' => 'Bez Účtu', 'dosp_ucet' => '0'];
+$GLOBALS['roles'] = ['administrator']; sb_sprava_dospelych();
+$bu = sb_najdi_dospeleho_dle_jmena('Bez Účtu');
+$_POST = ['sb_dosp_rodic' => '1', '_wpnonce_dospeli' => 'tok', 'edit_dospely_id' => (string) $bu->ID, 'dosp_cil' => '0', 'dosp_nova_rodina' => 'Bezúčtovi'];
+sb_sprava_dospelych();
+$bur = null; foreach ($GLOBALS['posts'] as $p) if ($p->post_title === 'Bezúčtovi') $bur = $p;
+ok($bur && get_post_meta($bur->ID, 'rodice_rodiny') === [], 'člen bez účtu přejde do nové rodiny bez „prázdného" účtu');
 
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
