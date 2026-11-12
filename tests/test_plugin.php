@@ -649,5 +649,20 @@ $ulozit($o, ['rodic_clen_form' => '1', 'rodic_clen' => ['11'], 'rodic_prezdivka'
 $ja = sb_najdi_dospeleho_dle_jmena('Nováková Jana'); $ma = sb_najdi_dospeleho_dle_jmena('Bezúčtová Marie');
 ok($ja && get_post_meta($ja->ID, 'sb_prezdivka') === 'Raketa' && $ma && get_post_meta($ma->ID, 'sb_prezdivka') === 'Majka', 'při osamostatnění se přezdívky přenesou');
 
+
+// --- Upozornění na jednotky bez e-mailu ---
+$GLOBALS['roles'] = ['administrator'];
+$tu = wp_insert_post(['post_type' => 'rodina', 'post_title' => 'Bezmailovi', 'post_status' => 'publish']);
+$h = sb_prehled_rodin();
+ok(strpos($h, 'Bez e-mailu') !== false && strpos($h, "#sb-rodina-$tu' style='white-space:nowrap;'>Bezmailovi") !== false && strpos($h, 'záložce Platby') !== false, 'Správa rodin vypíše rodinu bez e-mailu s odkazem na kartu');
+update_post_meta($tu, 'sb_kontakt_email', 'bez@example.cz');
+ok(strpos(sb_prehled_rodin(), "#sb-rodina-$tu'") === false, 'po doplnění kontaktního e-mailu rodina z upozornění zmizí');
+delete_post_meta($tu, 'sb_kontakt_email');
+$GLOBALS['roles'] = ['author'];
+$h = sb_prehled_rodin();
+ok(strpos($h, "#sb-rodina-$tu'") !== false && strpos($h, 'pošlete ho prosím správci') !== false, 'vedoucí vidí upozornění s výzvou poslat e-mail správci');
+ok(strpos(sb_sprava_dospelych(), 'Bez e-mailu') === false || strpos(sb_sprava_dospelych(), "#sb-dospely-") !== false, 'upozornění ve Správě dospělých odkazuje na karty členů');
+$GLOBALS['roles'] = ['administrator'];
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

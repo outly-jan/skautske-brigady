@@ -1308,6 +1308,26 @@ function sb_emaily_prispevku($rodina_id) {
     return $ucty ? array_values($ucty) : sb_kontakt_emaily($rodina_id);
 }
 
+// Upozornění na aktivní rodiny / dospělé členy bez e-mailu (nelze jim poslat e-mail s platbou).
+function sb_bez_emailu_html($jednotky, $kotva, $je_spravce, $dospeli = false) {
+    $chybi = [];
+    foreach ($jednotky as $r) if (!sb_emaily_prispevku($r->ID)) $chybi[] = $r;
+    if (!$chybi) return '';
+    $odkazy = [];
+    foreach ($chybi as $r) {
+        $nick = $dospeli ? trim((string) get_post_meta($r->ID, 'sb_prezdivka', true)) : '';
+        $odkazy[] = "<a href='#" . $kotva . intval($r->ID) . "' style='white-space:nowrap;'>" . esc_html($r->post_title . ($nick !== '' ? ' (' . $nick . ')' : '')) . "</a>";
+    }
+    if ($je_spravce) {
+        $kde = $dospeli ? 'v kartě člena (Upravit → Kontaktní e-mail)' : 'v záložce Platby (pole Kontaktní e-mail)';
+        $rada = "Doplňte kontaktní e-mail $kde, nebo ať si založí účet na webu.";
+    } else {
+        $rada = 'Pokud e-mail znáte (např. ze skautISu), pošlete ho prosím správci brigád.';
+    }
+    return "<div class='sb-alert sb-alert-warning'><strong>✉ Bez e-mailu (" . count($chybi) . ")</strong> – nelze jim poslat e-mail s informacemi o platbě: "
+        . implode(', ', $odkazy) . ".<br><small>" . esc_html($rada) . "</small></div>";
+}
+
 // Platící rodiny pro rok: [['rodina' => WP_Post, 'info' => [...]], ...] (abecedně)
 function sb_platici_rodiny($rok) {
     $vysl = [];
@@ -2036,6 +2056,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Účty na webu zaškrtni <strong>dospělý člen skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li><strong>Účty na webu</strong> v kartě rodiny = kdo se za rodinu přihlašuje do Moje brigády (rodiče, případně nezletilé dítě s vlastním účtem – u něj nezaškrtávej „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtni a účet mu přiřaď v jeho samostatném záznamu ve Správě dospělých členů</li>
+                    <li><strong>Bez e-mailu</strong>: nahoře ve Správě rodin i Správě dospělých členů (vidí to i vedoucí) je seznam jednotek, kterým nelze poslat e-mail s platbou – kontaktní e-mail rodině doplníš v záložce Platby, dospělému v jeho kartě</li>
                     <li><strong>Přezdívky</strong>: u samostatného dospělého v jeho kartě, u rodiče-člena v kartě rodiny (pole pod účtem, u člena bez účtu vedle jména; stačí i zápis do závorky za jménem). Zobrazují se u jména, do zprávy pro příjemce platby se nedávají</li>
                     <li>Překlep ve jméně člena bez účtu opravíš přepsáním; vymazáním jména nebo „už není členem“ se člen zadaný v této revizi odebere úplně (bez archivu)</li>
                     <li>Omylem zaškrtnuté „Dospělý člen“ vrátíš v kartě rodiny volbou <em>Vrátit do rodiny (byl to omyl)</em> – samostatný záznam se zruší</li>
@@ -3012,6 +3033,7 @@ function sb_napoveda_vedouci() {
         <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Účty na webu <em>dospělý člen skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Co jsou „Účty na webu“ v kartě rodiny?</strong> Účty, kterými se za rodinu přihlašuje do Moje brigády – rodiče, případně dítě s vlastním účtem (u dítěte nezaškrtávejte „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtněte a účet mu přiřaďte ve Správě dospělých členů.</p>
+        <p><strong>Bez e-mailu</strong>: nahoře ve Správě rodin a ve Správě dospělých členů je seznam těch, kterým nelze poslat e-mail s platbou (nemají účet ani kontaktní e-mail). Pokud jejich e-mail znáte, pošlete ho prosím správci.</p>
         <p><strong>Přezdívky</strong> dospělých členů zapíšete v jejich kartě (samostatní dospělí) nebo v kartě rodiny pod účtem rodiče, případně do závorky za jménem.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
         <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>
@@ -3279,6 +3301,8 @@ function sb_sprava_dospelych() {
         echo "<div class='sb-btn-row'><input type='submit' name='sb_dosp_novy' value='➕ Přidat člena' class='sb-btn sb-btn-primary'></div>";
         echo "</form></details></div>";
     }
+
+    echo sb_bez_emailu_html($aktivni, 'sb-dospely-', sb_je_spravce(), true);
 
     echo "<div class='sb-card'><div class='sb-rod-toolbar'><input type='text' id='sb-dosp-hledat' placeholder='🔍 Hledat člena…' autocomplete='off'><span class='sb-text-hint'>Dospělých členů: " . count($aktivni) . "</span></div></div>";
 
@@ -4506,6 +4530,8 @@ function sb_prehled_rodin() {
     } elseif (!$smi_upravovat) {
         echo sb_alert('Rodiny můžete teď jen prohlížet. Úpravy se otevřou, když správce zahájí revizi rodin.', 'info');
     }
+
+    echo sb_bez_emailu_html($aktivni_rodiny, 'sb-rodina-', $je_spravce);
 
     echo "<div class='sb-card'>";
     echo "<div class='sb-rod-toolbar'>";
