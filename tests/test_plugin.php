@@ -664,5 +664,8 @@ ok(strpos($h, "#sb-rodina-$tu'") !== false && strpos($h, 'pošlete ho prosím Sp
 ok(strpos(sb_sprava_dospelych(), 'Bez e-mailu') === false || strpos(sb_sprava_dospelych(), "#sb-dospely-") !== false, 'upozornění ve Správě dospělých odkazuje na karty členů');
 $GLOBALS['roles'] = ['administrator'];
 
+$em = sb_prispevek_email(get_post($y), ['rok' => 2027, 'je_dospely' => true, 'deti' => 0, 'dospeli' => 1, 'dospeli_jmena' => ['Samostatný Karel'], 'za_dospeleho' => 1500, 'zaklad_dospeli' => 1500, 'zaklad' => 1500, 'brigady' => ['v_roce' => false, 'pozadavek' => 0, 'castka' => 0], 'dar' => 0, 'celkem' => 1500, 'stav' => 'nezaplaceno', 'zaplaceno' => 0, 'zbyva' => 1500, 'jmena' => [], 'jmena_qr' => ['Samostatný Karel'], 'rodina' => '', 'ucet' => '2300221146/2010', 'platby' => []]);
+ok(strpos($em['html'], 'Příspěvek 2027 a moje brigády</a>') !== false && strpos($em['html'], '>Moje brigády</a>') === false, 'e-mail odkazuje na sekci „Příspěvek 2027 a moje brigády“');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

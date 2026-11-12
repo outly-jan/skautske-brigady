@@ -1255,9 +1255,9 @@ function sb_prispevek_email($rodina, $info) {
     }
     $h .= sb_prispevek_html($info, $qr, true);
     if ($info['stav'] !== 'zaplaceno') {
-        $h .= "<p style='margin-top:16px;'>Pokud vám to přijde smysluplné a váš rodinný rozpočet to dovolí, můžete nás podpořit i formou sponzorského daru – částku stačí k příspěvku jednoduše přidat. Na dar vám rádi vystavíme potvrzení. Dar můžete zadat i po přihlášení na webu v sekci <a href='$url'>Moje brigády</a>, kde se vám rovnou upraví částka i QR kód.</p>";
+        $h .= "<p style='margin-top:16px;'>Pokud vám to přijde smysluplné a váš rodinný rozpočet to dovolí, můžete nás podpořit i formou sponzorského daru – částku stačí k příspěvku jednoduše přidat. Na dar vám rádi vystavíme potvrzení. Dar můžete zadat i po přihlášení na webu v sekci <a href='$url'>Příspěvek $rok a moje brigády</a>, kde se vám rovnou upraví částka i QR kód.</p>";
     }
-    $h .= "<p>Přehled odpracovaných hodin najdete po přihlášení na webu v sekci <a href='$url'>Moje brigády</a>.</p>";
+    $h .= "<p>Přehled odpracovaných hodin najdete po přihlášení na webu v sekci <a href='$url'>Příspěvek $rok a moje brigády</a>.</p>";
     $h .= "<p>V případě dotazů stačí odpovědět na tento e-mail.</p>";
     $h .= "<p>Děkujeme,<br>Skautské středisko Černého havrana, Chlumec nad Cidlinou</p>";
     $h .= "</div>";
