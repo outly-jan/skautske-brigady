@@ -1322,7 +1322,7 @@ function sb_bez_emailu_html($jednotky, $kotva, $je_spravce, $dospeli = false) {
         $kde = $dospeli ? 'v kartě člena (Upravit → Kontaktní e-mail)' : 'v záložce Platby (pole Kontaktní e-mail)';
         $rada = "Doplňte kontaktní e-mail $kde, nebo ať si založí účet na webu.";
     } else {
-        $rada = 'Pokud e-mail znáte (např. ze skautISu), pošlete ho prosím správci brigád.';
+        $rada = 'Pokud e-mail znáte, pošlete ho prosím Spajdymu.';
     }
     return "<div class='sb-alert sb-alert-warning'><strong>✉ Bez e-mailu (" . count($chybi) . ")</strong> – nelze jim poslat e-mail s informacemi o platbě: "
         . implode(', ', $odkazy) . ".<br><small>" . esc_html($rada) . "</small></div>";
@@ -3033,7 +3033,7 @@ function sb_napoveda_vedouci() {
         <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Účty na webu <em>dospělý člen skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Co jsou „Účty na webu“ v kartě rodiny?</strong> Účty, kterými se za rodinu přihlašuje do Moje brigády – rodiče, případně dítě s vlastním účtem (u dítěte nezaškrtávejte „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtněte a účet mu přiřaďte ve Správě dospělých členů.</p>
-        <p><strong>Bez e-mailu</strong>: nahoře ve Správě rodin a ve Správě dospělých členů je seznam těch, kterým nelze poslat e-mail s platbou (nemají účet ani kontaktní e-mail). Pokud jejich e-mail znáte, pošlete ho prosím správci.</p>
+        <p><strong>Bez e-mailu</strong>: nahoře ve Správě rodin a ve Správě dospělých členů je seznam těch, kterým nelze poslat e-mail s platbou (nemají účet ani kontaktní e-mail). Pokud jejich e-mail znáte, pošlete ho prosím Spajdymu.</p>
         <p><strong>Přezdívky</strong> dospělých členů zapíšete v jejich kartě (samostatní dospělí) nebo v kartě rodiny pod účtem rodiče, případně do závorky za jménem.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
         <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>

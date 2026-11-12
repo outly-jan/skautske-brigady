@@ -660,7 +660,7 @@ ok(strpos(sb_prehled_rodin(), "#sb-rodina-$tu'") === false, 'po doplnění konta
 delete_post_meta($tu, 'sb_kontakt_email');
 $GLOBALS['roles'] = ['author'];
 $h = sb_prehled_rodin();
-ok(strpos($h, "#sb-rodina-$tu'") !== false && strpos($h, 'pošlete ho prosím správci') !== false, 'vedoucí vidí upozornění s výzvou poslat e-mail správci');
+ok(strpos($h, "#sb-rodina-$tu'") !== false && strpos($h, 'pošlete ho prosím Spajdymu') !== false, 'vedoucí vidí upozornění s výzvou poslat e-mail správci');
 ok(strpos(sb_sprava_dospelych(), 'Bez e-mailu') === false || strpos(sb_sprava_dospelych(), "#sb-dospely-") !== false, 'upozornění ve Správě dospělých odkazuje na karty členů');
 $GLOBALS['roles'] = ['administrator'];
 
