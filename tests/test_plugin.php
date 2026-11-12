@@ -559,5 +559,43 @@ ok(sb_dospeli_rodiny(100) === [['jmeno' => 'Masopustová Lenka', 'od_roku' => $c
 $_POST = []; $h = sb_prehled_rodin();
 ok(strpos($h, "name='dospely_jmeno[0]' value='Masopustová Lenka' maxlength='100' required") === false, 'pole jména není povinné (jde vymazat)');
 
+echo "== 18. Rodič s účtem: zaškrtávátko je členem skauta ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+update_option('sb_prispevky', [$cil => ['1' => 1200, '2' => 1100, '3' => 1000, 'dosp' => 620, 'ucet' => '2300221146/2010', 'od' => date('Y-m-d', strtotime('-1 day')), 'do' => date('Y-m-d', strtotime('+30 days'))]]);
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos($h, "name='rodic_clen[]' value='11'") !== false && strpos($h, "name='rodic_clen[]' value='12'") !== false, 'u každého rodiče s účtem je zaškrtávátko „je členem skauta"');
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11']]);
+ok(sb_dospeli_rodiny(100)[0]['uid'] === 11 && sb_dospeli_pro_rok(100, $cil) === ['Nováková Jana'], 'zaškrtnutím je rodič dospělým členem (podle účtu)');
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11']]);
+ok(count(sb_dospeli_rodiny(100)) === 1, 'opakované uložení (F5) nic nezdvojí');
+$GLOBALS['users'][11]->last_name = 'Nováková-Opravená';
+ok(sb_dospeli_pro_rok(100, $cil) === ['Nováková-Opravená Jana'], 'jméno se bere z aktuálního profilu (oprava kapitálek se projeví)');
+$GLOBALS['users'][11]->last_name = 'Nováková';
+// dva lidé se stejným jménem
+user(31, 'Zdeněk', 'Hrouda', 'z1@example.cz'); user(32, 'Zdeněk', 'Hrouda', 'z2@example.cz');
+post(700, 'rodina', 'Hroudovi', '2024-01-01 10:00:00'); update_post_meta(700, 'rodice_rodiny', [31, 32]);
+update_post_meta(700, 'deti_rodiny', [['jmeno' => 'Hroudová Ema', 'oddil' => 'Skauti']]);
+$_POST = ['edit_rodina_id' => '700', 'ulozit_rodinu' => '1', '_wpnonce_ulozit_rodinu' => 'tok', 'novy_nazev' => 'Hroudovi', 'rodice' => ['31', '32'], 'rodic_clen_form' => '1', 'rodic_clen' => ['31', '32'], 'deti' => [0 => ['puvodni' => 'Hroudová Ema', 'jmeno' => 'Hroudová Ema', 'oddil' => 'Skauti']]];
+sb_prehled_rodin();
+$i = sb_prispevek_rodiny(get_post(700), $cil);
+ok(count(sb_dospeli_rodiny(700)) === 2 && $i['dospeli'] === 2 && $i['zaklad_dospeli'] === 1240, 'dva Zdeňkové Hroudové se stejným jménem = dva členové (2 × 620 Kč)');
+// odškrtnutí
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => []]);
+ok(sb_dospeli_rodiny(100) === [] && sb_dospeli_archiv(100) === [], 'odškrtnutí člena zadaného v téže revizi = odebrán bez archivu');
+update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Nováková Jana', 'uid' => 11, 'od_roku' => $tato - 1]]);
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => []]);
+ok(sb_dospeli_pro_rok(100, $tato) === ['Nováková Jana'] && sb_dospeli_pro_rok(100, $cil) === [], 'odškrtnutí dřívějšího člena: letos platí, od příštího roku ne');
+// vedoucí: bez zaškrtávátka, automaticky
+$GLOBALS['users'][12]->roles = ['rodic', 'author'];
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos($h, "name='rodic_clen[]' value='12'") === false && strpos($h, 'vedoucí – člen skauta automaticky') !== false, 'u vedoucího místo zaškrtávátka „vedoucí – člen skauta automaticky"');
+// osamostatnění podle účtu
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11']]);
+$o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
+$ulozit($o, ['rodic_clen_form' => '1', 'rodic_clen' => ['11']]);
+$ja = sb_najdi_dospeleho_dle_jmena('Nováková Jana');
+ok($ja && get_post_meta($ja->ID, 'rodice_rodiny') === [11], 'po archivaci rodiny se člen s účtem osamostatní i s účtem');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

@@ -394,11 +394,27 @@ function sb_osamostatnit_rodinu($id, $od_roku, $poznamka) {
     $osamostatneni = [];
     $dosp_zbytek = sb_dospeli_rodiny($id);
     $dosp_archiv = sb_dospeli_archiv($id);
+    $rodice_zbytek = array_map('intval', sb_ucty_jednotky($id));
+    // Členové s účtem (zaškrtnutí „je členem skauta"): osamostatní se podle účtu
+    $hotove_uids = [];
+    foreach ($dosp_zbytek as $k => $d) {
+        if (empty($d['uid'])) continue;
+        $uid = intval($d['uid']);
+        unset($dosp_zbytek[$k]);
+        if (in_array($uid, $hotove_uids, true)) continue;
+        $jm = sb_dospely_jmeno($d);
+        $ucet = in_array($uid, $rodice_zbytek, true) ? [$uid] : [];
+        if (sb_vytvorit_dospeleho($jm, $ucet, $od_roku)) {
+            $osamostatneni[] = $jm;
+            $hotove_uids[] = $uid;
+            $rodice_zbytek = array_values(array_diff($rodice_zbytek, [$uid]));
+        }
+    }
     // Vedoucí rodiče: osamostatní se i s účtem na webu (aby dál viděli Moje brigády)
     $vedouci_r = sb_vedouci_rodice($id);
     $klice_rucni = array_map(function($d) { return sb_jmeno_klic($d['jmeno']); }, $dosp_zbytek);
-    $rodice_zbytek = array_map('intval', sb_ucty_jednotky($id));
     foreach ($vedouci_r as $uid => $jm) {
+        if (in_array($uid, $hotove_uids, true)) continue;
         $k = array_search(sb_jmeno_klic($jm), $klice_rucni, true);
         if ($k !== false) unset($dosp_zbytek[$k]); // ručně zadaný = tatáž osoba
         if (sb_vytvorit_dospeleho($jm, [$uid], $od_roku)) {
@@ -930,19 +946,41 @@ function sb_jmeno_klic($j) {
     return implode(' ', $w);
 }
 
+// Jméno uživatele ve tvaru „Příjmení Jméno".
+function sb_jmeno_uctu($u) {
+    if (!$u) return '';
+    $j = trim(($u->last_name ?? '') . ' ' . ($u->first_name ?? ''));
+    return $j !== '' ? $j : (string) ($u->display_name ?? '');
+}
+
+// Jméno dospělého člena v rodině – u člena s účtem aktuální jméno z profilu.
+function sb_dospely_jmeno($d) {
+    if (!empty($d['uid'])) {
+        $u = get_userdata(intval($d['uid']));
+        if ($u && sb_jmeno_uctu($u) !== '') return sb_jmeno_uctu($u);
+    }
+    return (string) ($d['jmeno'] ?? '');
+}
+
 // Jména dospělých členů rodiny, za které se v roce $rok platí příspěvek
-// (zadaní ručně + automaticky rodiče, kteří jsou vedoucí).
+// (zaškrtnutí rodiče s účtem, ručně zadaní bez účtu + automaticky rodiče, kteří jsou vedoucí).
 function sb_dospeli_pro_rok($rodina_id, $rok) {
-    $rok = intval($rok); $jmena = [];
+    $rok = intval($rok); $jmena = []; $uids = []; $klice_bez_uctu = [];
+    $pridej = function($d) use (&$jmena, &$uids, &$klice_bez_uctu) {
+        $j = sb_dospely_jmeno($d);
+        if ($j === '') return;
+        $jmena[] = $j;
+        if (!empty($d['uid'])) $uids[] = intval($d['uid']); else $klice_bez_uctu[] = sb_jmeno_klic($j);
+    };
     foreach (sb_dospeli_rodiny($rodina_id) as $d) {
-        if (!empty($d['jmeno']) && intval($d['od_roku'] ?? 0) <= $rok) $jmena[] = $d['jmeno'];
+        if (intval($d['od_roku'] ?? 0) <= $rok) $pridej($d);
     }
     foreach (sb_dospeli_archiv($rodina_id) as $d) {
-        if (!empty($d['jmeno']) && intval($d['od_roku'] ?? 0) <= $rok && intval($d['do_roku'] ?? 0) > $rok) $jmena[] = $d['jmeno'];
+        if (intval($d['od_roku'] ?? 0) <= $rok && intval($d['do_roku'] ?? 0) > $rok) $pridej($d);
     }
-    $klice = array_map('sb_jmeno_klic', $jmena);
-    foreach (sb_vedouci_rodice($rodina_id) as $j) {
-        if (!in_array(sb_jmeno_klic($j), $klice, true)) { $jmena[] = $j; $klice[] = sb_jmeno_klic($j); }
+    foreach (sb_vedouci_rodice($rodina_id) as $uid => $j) {
+        if (in_array($uid, $uids, true) || in_array(sb_jmeno_klic($j), $klice_bez_uctu, true)) continue;
+        $jmena[] = $j; $uids[] = $uid;
     }
     return $jmena;
 }
@@ -1975,7 +2013,7 @@ if (array_intersect($roles, $allowed_limited)) {
                 <h5>🧑 <b>Dospělí členové</b></h5>
                 <ul>
                     <li><strong>Dítě dospělo</strong> – ve Správě rodin u dítěte zaškrtni <strong>Dospělý člen</strong>: od příštího roku odejde z rodiny a vznikne samostatný dospělý člen (najdeš ho v záložce <strong>Správa dospělých členů</strong>)</li>
-                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin ho přidej do „Dospělí členové v rodině“: rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
+                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Rodiče zaškrtni <strong>je členem skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li>Omylem zaškrtnuté „Dospělý člen“ vrátíš v kartě rodiny volbou <em>Vrátit do rodiny (byl to omyl)</em> – samostatný záznam se zruší</li>
                     <li>Když rodině nezůstane žádné dítě, rodina se automaticky archivuje a dospělí členové v ní se stanou samostatnými dospělými členy</li>
@@ -2948,7 +2986,7 @@ function sb_napoveda_vedouci() {
             <li>Klikněte na <strong>💾 Uložit rodinu</strong>. Karta se sbalí a krátce se zeleně orámuje – uloženo.</li>
         </ol>
         <p><strong>Dítěti je 18 a zůstává ve skautu?</strong> Zaškrtněte místo toho <strong>Dospělý člen</strong> – od příštího roku bude vedeno samostatně v záložce <em>Správa dospělých členů</em>.</p>
-        <p><strong>Rodič je sám členem skauta?</strong> Napište jeho jméno do pole <em>Přidat dospělého člena</em> v rozbalené kartě rodiny a uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
+        <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Rodiče <em>je členem skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
         <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>
@@ -4179,15 +4217,35 @@ function sb_prehled_rodin() {
                                         continue; // vymazané jméno u člena zadaného v této revizi = odebrat
                                     }
                                 }
-                                // stejné jméno dvakrát (např. po obnovení stránky) = jen jednou
-                                $klice_nove = array_map(function($x) { return sb_jmeno_klic($x['jmeno']); }, $dosp_nove);
-                                if (in_array(sb_jmeno_klic($d['jmeno']), $klice_nove, true)) continue;
+                                // stejné jméno dvakrát (např. po obnovení stránky) = jen jednou (u členů bez účtu)
+                                if (empty($d['uid'])) {
+                                    $klice_nove = array_map(function($x) { return sb_jmeno_klic($x['jmeno']); }, array_filter($dosp_nove, function($x) { return empty($x['uid']); }));
+                                    if (in_array(sb_jmeno_klic($d['jmeno']), $klice_nove, true)) continue;
+                                }
                                 $dosp_nove[] = $d;
                             }
                         }
+                        // Rodiče s účtem označení „je členem skauta" (podle účtu, ne podle jména)
+                        if (!empty($_POST['rodic_clen_form'])) {
+                            $chci = (isset($_POST['rodic_clen']) && is_array($_POST['rodic_clen'])) ? array_map('intval', $_POST['rodic_clen']) : [];
+                            $chci = array_values(array_diff(array_intersect($chci, $vybrani_rodice), array_keys(sb_vedouci_rodice($id))));
+                            $upraveno = []; $ma = [];
+                            foreach ($dosp_nove as $d) {
+                                if (empty($d['uid'])) { $upraveno[] = $d; continue; }
+                                if (in_array(intval($d['uid']), $chci, true) && !in_array(intval($d['uid']), $ma, true)) {
+                                    $upraveno[] = $d; $ma[] = intval($d['uid']);
+                                } elseif (!in_array(intval($d['uid']), $chci, true) && intval($d['od_roku'] ?? 0) < $od_roku) {
+                                    $dosp_archiv[] = ['jmeno' => sb_dospely_jmeno($d), 'uid' => intval($d['uid']), 'od_roku' => intval($d['od_roku'] ?? 0), 'do_roku' => $od_roku, 'datum' => $dnes];
+                                }
+                            }
+                            foreach ($chci as $cuid) {
+                                if (!in_array($cuid, $ma, true)) $upraveno[] = ['jmeno' => sb_jmeno_uctu(get_userdata($cuid)), 'uid' => $cuid, 'od_roku' => $od_roku];
+                            }
+                            $dosp_nove = $upraveno;
+                        }
                         $novy_dosp = trim(preg_replace('/\s*\([^)]*\)/u', '', sanitize_text_field(wp_unslash($_POST['novy_dospely'] ?? ''))));
                         if ($novy_dosp !== '') {
-                            $klice_nove = array_map(function($x) { return sb_jmeno_klic($x['jmeno']); }, $dosp_nove);
+                            $klice_nove = array_map(function($x) { return sb_jmeno_klic(sb_dospely_jmeno($x)); }, $dosp_nove);
                             $klice_vedouci = array_map('sb_jmeno_klic', sb_vedouci_rodice($id));
                             if (in_array(sb_jmeno_klic($novy_dosp), array_merge($klice_nove, $klice_vedouci), true)) {
                                 $zprava .= sb_alert(esc_html($novy_dosp) . ' už je dospělým členem této rodiny – podruhé se nepřidává.', 'info');
@@ -4428,12 +4486,13 @@ function sb_prehled_rodin() {
             echo "<span class='sb-chip'>" . esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " <small>(" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ")</small></span>";
         }
         $klice_rucni = [];
+        $uid_clenove = [];
         foreach (sb_dospeli_rodiny($r->ID) as $d) {
-            $klice_rucni[] = sb_jmeno_klic($d['jmeno']);
-            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html($d['jmeno']) . " <small>(dospělý člen)</small></span>";
+            if (!empty($d['uid'])) $uid_clenove[] = intval($d['uid']); else $klice_rucni[] = sb_jmeno_klic($d['jmeno']);
+            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html(sb_dospely_jmeno($d)) . " <small>(dospělý člen)</small></span>";
         }
-        foreach (sb_vedouci_rodice($r->ID) as $j) {
-            if (in_array(sb_jmeno_klic($j), $klice_rucni, true)) continue;
+        foreach (sb_vedouci_rodice($r->ID) as $vuid => $j) {
+            if (in_array($vuid, $uid_clenove, true) || in_array(sb_jmeno_klic($j), $klice_rucni, true)) continue;
             echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html($j) . " <small>(vedoucí – člen automaticky)</small></span>";
         }
         foreach ($archiv_deti as $d) {
@@ -4464,11 +4523,22 @@ function sb_prehled_rodin() {
                 echo "<input type='text' name='novy_nazev' value='" . esc_attr($r->post_title) . "' required style='width:100%; max-width:100%;'>";
 
                 echo "<div class='sb-rod-sekce'>Rodiče</div>";
+                $vedouci_ucty = sb_vedouci_rodice($r->ID);
+                $clenove_ucty = [];
+                foreach (sb_dospeli_rodiny($r->ID) as $d) if (!empty($d['uid'])) $clenove_ucty[] = intval($d['uid']);
+                echo "<input type='hidden' name='rodic_clen_form' value='1'>";
                 foreach ($vsichni_rodice as $u) {
                     $je_clen  = in_array($u->ID, $prirazeni);
                     $je_jinde = isset($obsazeni[$u->ID]) && $obsazeni[$u->ID] != $r->ID;
                     if ($je_jinde) continue;
-                    echo "<label class='sb-rod-check'><input type='checkbox' name='rodice[]' value='" . esc_attr($u->ID) . "'" . ($je_clen ? " checked" : "") . "> " . sb_format_rodic_jmeno($u) . "</label>";
+                    echo "<div class='sb-rod-check' style='display:flex; flex-wrap:wrap; gap:4px 14px; align-items:center;'>";
+                    echo "<label style='font-weight:normal;'><input type='checkbox' name='rodice[]' value='" . esc_attr($u->ID) . "'" . ($je_clen ? " checked" : "") . "> " . sb_format_rodic_jmeno($u) . "</label>";
+                    if ($je_clen && isset($vedouci_ucty[$u->ID])) {
+                        echo "<span class='sb-text-hint'>vedoucí – člen skauta automaticky</span>";
+                    } elseif ($je_clen) {
+                        echo "<label style='font-weight:normal; font-size:12px; color:#0b5394;'><input type='checkbox' name='rodic_clen[]' value='" . esc_attr($u->ID) . "'" . (in_array(intval($u->ID), $clenove_ucty, true) ? " checked" : "") . "> je členem skauta</label>";
+                    }
+                    echo "</div>";
                 }
 
                 echo "<div class='sb-rod-sekce'>Děti (nejvýše " . intval($max_deti) . ")</div>";
@@ -4516,16 +4586,14 @@ function sb_prehled_rodin() {
                 }
 
                 // Dospělí členové rodiny (rodiče, kteří jsou sami členy skauta)
-                echo "<div class='sb-rod-sekce'>Dospělí členové v rodině (rodič, který je sám členem skauta)</div>";
+                echo "<div class='sb-rod-sekce'>Dospělí členové v rodině bez účtu na webu (rodič, který je sám členem skauta)</div>";
                 foreach (sb_dospeli_rodiny($r->ID) as $di => $d) {
+                    if (!empty($d['uid'])) continue; // člen s účtem se značí v seznamu Rodiče
                     echo "<div class='sb-dite-row'>";
                     echo "<input type='text' name='dospely_jmeno[" . intval($di) . "]' value='" . esc_attr($d['jmeno']) . "' maxlength='100'>";
                     echo "<span class='sb-text-hint'>člen od roku " . intval($d['od_roku'] ?? 0) . "</span>";
                     echo "<label class='sb-nechodi'><input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
                     echo "</div>";
-                }
-                foreach (sb_vedouci_rodice($r->ID) as $j) {
-                    echo "<div class='sb-rod-check'>" . esc_html($j) . " <span class='sb-text-hint'>(vedoucí – člen automaticky, nezadávejte)</span></div>";
                 }
                 echo "<input type='text' name='novy_dospely' maxlength='100' placeholder='Přidat dospělého člena – příjmení a jméno' style='width:100%; max-width:100%;'>";
 
