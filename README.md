@@ -12,6 +12,7 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 - Správa rodin — přehled karet (rodina, rodiče, děti a oddíl), úpravy přímo na kartě, vyhledávání, vhodné i pro mobil
 - Archiv: děti, které už skauta nenavštěvují, i celé rodiny se přesouvají do archivu (data se nemažou) a od příštího roku se nepočítají do požadavků
 - Revize rodin: správce zahájí/ukončí revizi, během níž mohou rodiny upravovat i vedoucí (role `author`)
+- **Dospělí členové**: samostatní dospělí (záložka *Správa dospělých členů (bez dětí ve skautu)*) i rodiče-členové v rodině, přechod dítě → dospělý člen, přezdívky, příspěvek dospělého člena a osobní brigádní požadavek bez doplatku
 - Nastavení ročních požadavků na hodiny dle počtu dětí v rodině (1, 2, 3+ děti) a hodinové sazby za nesplnění
 - **Skautský rok**: požadavky se vztahují jen na rodiny vzniklé do 31. 8. daného roku; počet dětí se snímkuje ke konci sezóny (tlačítkem nebo ručně)
 - **Převod hodin nových rodin**: hodiny odpracované v roce vzniku rodiny (po 31. 8.) se převedou do prvního roku s požadavky
@@ -74,6 +75,8 @@ Kromě rodin s dětmi plugin eviduje i **dospělé členy**:
 - **Dítě dospělo**: ve Správě rodin volba *Dospělý člen* – dítě se archivuje (`dospely: true`) a vznikne samostatný dospělý člen s `sb_od_roku` = rok, od kterého se počítá (žádné dvojí placení).
 - **Rodině nezůstalo dítě** (všechny odešly nebo dospěly): rodina se archivuje a její dospělí členové se osamostatní (i s účty na webu).
 - **Rodina, která děti nemá** (např. dva vedoucí): tlačítko *Převést na dospělé členy* v kartě rodiny udělá totéž.
+- **Účty na webu v kartě rodiny** (`rodice_rodiny`) = kdo se za rodinu přihlašuje (rodiče, případně nezletilé dítě s vlastním účtem – bez zaškrtnutí „dospělý člen“). Dospělé dítě s vlastním účtem patří ke svému samostatnému záznamu.
+- **Ochrany**: stejný člen se do rodiny nepřidá dvakrát (ani po obnovení stránky); člen zadaný v téže revizi se při odebrání smaže bez archivu; obnovení člena, který „se stal rodičem“, je zablokované, dokud je členem rodiny.
 
 ## Revize rodin a archiv
 
