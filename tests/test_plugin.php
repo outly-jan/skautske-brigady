@@ -299,12 +299,12 @@ ok(sb_platba_zprava($b) === 'Poplatek 2027 Outlý Matěj, Outlá Nela, dar 500',
 ok(strpos(sb_platba_zprava($b, true), '+') === false, 've zprávě v QR není znak „+"');
 $b = ['rok' => 2027, 'dar' => 1000, 'rodina' => 'Godoyovi Očkayovi', 'jmena' => ['Godoy Očkay Sebastián (Sebík)', 'Godoy Očkay Valentýna Marie', 'Godoy Očkay Maximilián']];
 $q = sb_platba_zprava($b, true);
-ok(strlen($q) <= 60 && strpos($q, 'Sebastian') !== false && strpos($q, 'Marie') !== false && strpos($q, 'Maximilian') !== false && substr($q, -10) === ', dar 1000', 'dlouhá jména: v QR zůstane každé dítě celé (' . $q . ')');
+ok(strlen($q) <= 60 && strpos($q, 'Sebastian') !== false && strpos($q, 'Valentyna') !== false && strpos($q, 'Maximilian') !== false && substr($q, -10) === ', dar 1000', 'dlouhá jména: v QR zůstane každé dítě celé (' . $q . ')');
 ok(sb_ascii(sb_platba_zprava($b)) === $q, 'zpráva na webu/v e-mailu odpovídá QR (jen s diakritikou)');
 $b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Applovi', 'jmena' => ['Applová Julie (Rákosníček)', 'Appl Josef', 'Applová Kateřina Anežka']];
-ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Anežka, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
-$b = ['rok' => 2027, 'dar' => 0, 'rodina' => 'Testerovi', 'jmena' => ['Matěj Tester', 'Nela Testerová', 'Outlý - Tester Jan']];
-ok(sb_platba_zprava($b) === 'Poplatek 2027 Testerovi: Matěj, Nela, Jan', 'pořadí „Jméno Příjmení" i dvojité příjmení s pomlčkou: ' . sb_platba_zprava($b));
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Applovi: Julie, Josef, Kateřina, dar 500', 'nevejdou-li se plná jména: příjmení rodiny + křestní jména');
+$b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Testerovi', 'jmena' => ['Matěj Tester', 'Nela Testerová', 'Jan Outlý-Tester']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Testerovi: Matěj, Nela, Jan, dar 500', 'pořadí „Jméno Příjmení" i dvojité příjmení s pomlčkou: ' . sb_platba_zprava($b));
 $b = ['rok' => 2027, 'dar' => 0, 'rodina' => 'Novákovi', 'jmena' => ['Nováková Svobodová Jana Marie', 'Novák Bartoloměj Tadeáš', 'Nováková Kristýna Valentýna']];
 $q = sb_platba_zprava($b, true);
 ok(strpos($q, 'Poplatek 2027 Novakovi:') === 0 && strlen($q) <= 60 && substr_count($q, ',') === 2, 'tři děti s dlouhými jmény: každé jedním křestním jménem (' . $q . ')');
@@ -531,6 +531,11 @@ $_POST = ['sb_dosp_rodic' => '1', '_wpnonce_dospeli' => 'tok', 'edit_dospely_id'
 sb_sprava_dospelych();
 $bur = null; foreach ($GLOBALS['posts'] as $p) if ($p->post_title === 'Bezúčtovi') $bur = $p;
 ok($bur && get_post_meta($bur->ID, 'rodice_rodiny') === [], 'člen bez účtu přejde do nové rodiny bez „prázdného" účtu');
+
+$b = ['rok' => 2027, 'dar' => 500, 'rodina' => 'Podlesní / Hořákovi / Kubátovi', 'jmena' => ['Podlesný Petr Maxmilián', 'Kubát Josef Bartoloměj', 'Hořák Vojtěch Kryštof', 'Hořáková Jana Marie']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Petr, Josef, Vojtěch, Jana, dar 500', 'různá příjmení v rodině: křestní jména (' . sb_platba_zprava($b) . ')');
+$b = ['rok' => 2027, 'dar' => 1000, 'rodina' => 'Novákovi', 'jmena' => ['Svobodová Anna Kristýna', 'Dvořák Tadeáš Bartoloměj', 'Novák Maximilián Ondřej']];
+ok(sb_platba_zprava($b) === 'Poplatek 2027 Novákovi: Anna, Tadeáš, Maximilián, dar 1000', 'příjmení mimo název rodiny: první slovo po příjmení (' . sb_platba_zprava($b) . ')');
 
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

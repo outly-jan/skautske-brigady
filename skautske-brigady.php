@@ -1060,9 +1060,9 @@ function sb_platba_zprava($info, $pro_qr = false) {
     $rok    = intval($info['rok']);
     $plna   = array_map(function($j) { return trim(preg_replace('/\s*\([^)]*\)/u', '', (string) $j)); }, !empty($info['jmena_qr']) ? $info['jmena_qr'] : $info['jmena']);
     $plna   = array_values(array_filter($plna, 'strlen'));
-    // Křestní jméno: slova, která odpovídají příjmení (shoda začátku s názvem rodiny nebo se slovy
-    // ostatních členů – Outlý/Outlá/Outlí), se vynechají; z ostatních slov se vezme poslední.
-    // Funguje pro „Příjmení Jméno" i „Jméno Příjmení"; slova bez písmen (např. „-") se ignorují.
+    // Křestní jméno: za příjmení se považují slova shodná začátkem s názvem rodiny nebo se slovy ostatních
+    // členů (Outlý/Outlá/Outlí). Standardně „Příjmení Jméno" → první slovo po příjmení; je-li příjmení
+    // na konci („Jméno Příjmení"), vezme se první slovo. Slova bez písmen (např. „-") se ignorují.
     $kmen = function($w) { return substr(strtolower(sb_ascii($w)), 0, 4); };
     $slova = array_map(function($j) {
         return array_values(array_filter(preg_split('/[\s\-–]+/u', $j), function($w) { return preg_match('/\p{L}/u', $w); }));
@@ -1073,8 +1073,15 @@ function sb_platba_zprava($info, $pro_qr = false) {
         $ostatni = [];
         foreach ($slova as $k => $w2) if ($k !== $i) foreach ($w2 as $x) $ostatni[] = $kmen($x);
         $prijmeni = array_merge($kmeny_rodiny, $ostatni);
-        $zbytek = array_values(array_filter($w, function($x) use ($kmen, $prijmeni) { return !in_array($kmen($x), $prijmeni, true); }));
-        $krestni[] = $zbytek ? end($zbytek) : ($w ? end($w) : '');
+        $je_prijmeni = function($x) use ($kmen, $prijmeni) { return in_array($kmen($x), $prijmeni, true); };
+        if (!$w) { $krestni[] = ''; continue; }
+        if (count($w) >= 2 && $je_prijmeni(end($w)) && !$je_prijmeni($w[0])) {
+            $krestni[] = $w[0];                         // „Jméno Příjmení"
+            continue;
+        }
+        $z = $w;                                         // „Příjmení Jméno [Jméno2]"
+        while (count($z) > 1 && $je_prijmeni($z[0])) array_shift($z);
+        $krestni[] = ($z === $w && count($w) >= 2) ? $w[1] : $z[0];
     }
     $rodina = trim((string) ($info['rodina'] ?? ''));
     $dar    = $info['dar'] > 0 ? ', dar ' . intval($info['dar']) : '';
