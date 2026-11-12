@@ -413,7 +413,7 @@ function sb_osamostatnit_rodinu($id, $od_roku, $poznamka) {
         if (in_array($uid, $hotove_uids, true)) continue;
         $jm = sb_dospely_jmeno($d);
         $ucet = in_array($uid, $rodice_zbytek, true) ? [$uid] : [];
-        if (sb_vytvorit_dospeleho($jm, $ucet, $od_roku)) {
+        if (sb_vytvorit_dospeleho($jm, $ucet, $od_roku, 0, (string) (sb_prezdivky_uctu($id)[$uid] ?? ''))) {
             $osamostatneni[] = $jm;
             $hotove_uids[] = $uid;
             $rodice_zbytek = array_values(array_diff($rodice_zbytek, [$uid]));
@@ -426,7 +426,7 @@ function sb_osamostatnit_rodinu($id, $od_roku, $poznamka) {
         if (in_array($uid, $hotove_uids, true)) continue;
         $k = array_search(sb_jmeno_klic($jm), $klice_rucni, true);
         if ($k !== false) unset($dosp_zbytek[$k]); // ručně zadaný = tatáž osoba
-        if (sb_vytvorit_dospeleho($jm, [$uid], $od_roku)) {
+        if (sb_vytvorit_dospeleho($jm, [$uid], $od_roku, 0, (string) (sb_prezdivky_uctu($id)[$uid] ?? ''))) {
             $osamostatneni[] = $jm;
             $rodice_zbytek = array_values(array_diff($rodice_zbytek, [$uid]));
         }
@@ -441,7 +441,7 @@ function sb_osamostatnit_rodinu($id, $od_roku, $poznamka) {
     foreach ($dosp_zbytek as $d) {
         $uid = array_search(sb_jmeno_klic($d['jmeno']), $rodice_jmena, true);
         $ucet = $uid !== false ? [intval($uid)] : [];
-        if (sb_vytvorit_dospeleho($d['jmeno'], $ucet, $od_roku)) {
+        if (sb_vytvorit_dospeleho($d['jmeno'], $ucet, $od_roku, 0, (string) ($d['prezdivka'] ?? ''))) {
             $osamostatneni[] = $d['jmeno'];
             if ($ucet) { $rodice_zbytek = array_values(array_diff($rodice_zbytek, $ucet)); unset($rodice_jmena[$uid]); }
         }
@@ -953,6 +953,17 @@ function sb_jmeno_klic($j) {
     $w = preg_split('/\s+/u', mb_strtolower(trim(preg_replace('/\s*\([^)]*\)/u', '', (string) $j))), -1, PREG_SPLIT_NO_EMPTY);
     sort($w);
     return implode(' ', $w);
+}
+
+// Přezdívky účtů v rodině (rodič s účtem, vedoucí): [user_id => přezdívka]
+function sb_prezdivky_uctu($rodina_id) {
+    $m = get_post_meta($rodina_id, 'sb_prezdivky_uctu', true);
+    return is_array($m) ? $m : [];
+}
+
+// Přezdívka ze závorky („Novák Jan (Pinďa)" → „Pinďa"), nebo ''.
+function sb_prezdivka_ze_jmena($j) {
+    return preg_match('/\(([^)]+)\)/u', (string) $j, $m) ? mb_substr(trim($m[1]), 0, 50) : '';
 }
 
 // Jméno uživatele ve tvaru „Příjmení Jméno".
@@ -3200,7 +3211,14 @@ function sb_sprava_dospelych() {
                             $rodice = sb_ucty_jednotky($cil->ID);
                             update_post_meta($cil->ID, 'rodice_rodiny', array_values(array_unique(array_merge(array_map('intval', array_filter($rodice, 'is_numeric')), $ucty))));
                             $dosp = sb_dospeli_rodiny($cil->ID);
-                            $dosp[] = ['jmeno' => $r->post_title, 'od_roku' => $rok_x];
+                            $nick_d = (string) get_post_meta($r->ID, 'sb_prezdivka', true);
+                            if ($ucty) {
+                                $mapa = sb_prezdivky_uctu($cil->ID);
+                                if ($nick_d !== '') { foreach ($ucty as $uu) $mapa[$uu] = $nick_d; update_post_meta($cil->ID, 'sb_prezdivky_uctu', $mapa); }
+                                $dosp[] = ['jmeno' => $r->post_title, 'uid' => intval($ucty[0]), 'od_roku' => $rok_x];
+                            } else {
+                                $dosp[] = ['jmeno' => $r->post_title, 'prezdivka' => $nick_d, 'od_roku' => $rok_x];
+                            }
                             update_post_meta($cil->ID, 'dospeli_clenove', $dosp);
                             update_post_meta($r->ID, 'rodina_archiv', ['od_roku' => $rok_x, 'poznamka' => 'Stal se rodičem – rodina ' . $cil->post_title, 'datum' => $dnes, 'presun_do' => $cil->ID]);
                             $kontakt_dosp = (string) get_post_meta($r->ID, 'sb_kontakt_email', true);
@@ -4229,7 +4247,11 @@ function sb_prehled_rodin() {
                             } else {
                                 // Oprava jména (překlep)
                                 if (isset($jmena_post[$di])) {
-                                    $opr = mb_substr(trim(preg_replace('/\s*\([^)]*\)/u', '', sanitize_text_field(wp_unslash((string) $jmena_post[$di])))), 0, 100);
+                                    $surove = sanitize_text_field(wp_unslash((string) $jmena_post[$di]));
+                                    $opr = mb_substr(trim(preg_replace('/\s*\([^)]*\)/u', '', $surove)), 0, 100);
+                                    $nick_post = isset($_POST['dospely_prezdivka'][$di]) ? mb_substr(trim(sanitize_text_field(wp_unslash((string) $_POST['dospely_prezdivka'][$di]))), 0, 50) : null;
+                                    if ($nick_post === '' && sb_prezdivka_ze_jmena($surove) !== '') $nick_post = sb_prezdivka_ze_jmena($surove);
+                                    if ($nick_post !== null) $d['prezdivka'] = $nick_post;
                                     if ($opr !== '') {
                                         $d['jmeno'] = $opr;
                                     } elseif (intval($d['od_roku'] ?? 0) >= $od_roku) {
@@ -4243,6 +4265,17 @@ function sb_prehled_rodin() {
                                 }
                                 $dosp_nove[] = $d;
                             }
+                        }
+                        // Přezdívky rodičů s účtem
+                        if (isset($_POST['rodic_prezdivka']) && is_array($_POST['rodic_prezdivka'])) {
+                            $mapa = sb_prezdivky_uctu($id);
+                            foreach ($_POST['rodic_prezdivka'] as $puid => $pn) {
+                                $puid = intval($puid);
+                                if (!in_array($puid, $vybrani_rodice, true)) continue;
+                                $pn = mb_substr(trim(sanitize_text_field(wp_unslash((string) $pn))), 0, 50);
+                                if ($pn !== '') $mapa[$puid] = $pn; else unset($mapa[$puid]);
+                            }
+                            if ($mapa) update_post_meta($id, 'sb_prezdivky_uctu', $mapa); else delete_post_meta($id, 'sb_prezdivky_uctu');
                         }
                         // Rodiče s účtem označení „je členem skauta" (podle účtu, ne podle jména)
                         if (!empty($_POST['rodic_clen_form'])) {
@@ -4278,7 +4311,7 @@ function sb_prehled_rodin() {
                             if (in_array(sb_jmeno_klic($novy_dosp), array_merge($klice_nove, $klice_vedouci), true)) {
                                 $zprava .= sb_alert(esc_html($novy_dosp) . ' už je dospělým členem této rodiny – podruhé se nepřidává.', 'info');
                             } else {
-                                $dosp_nove[] = ['jmeno' => mb_substr($novy_dosp, 0, 100), 'od_roku' => $od_roku];
+                                $dosp_nove[] = ['jmeno' => mb_substr($novy_dosp, 0, 100), 'prezdivka' => sb_prezdivka_ze_jmena(sanitize_text_field(wp_unslash($_POST['novy_dospely'] ?? ''))), 'od_roku' => $od_roku];
                             }
                         }
                         if ($dosp_nove) update_post_meta($id, 'dospeli_clenove', array_values($dosp_nove)); else delete_post_meta($id, 'dospeli_clenove');
@@ -4493,8 +4526,10 @@ function sb_prehled_rodin() {
         foreach ($prirazeni as $rid) {
             $u = get_userdata(intval($rid));
             if ($u) {
-                $pozn = isset($vedouci_karta[intval($rid)]) ? ' <small style="color:#0b5394;">(vedoucí)</small>'
-                      : (in_array(intval($rid), $uid_clenove_karta, true) ? ' <small style="color:#0b5394;">(člen skauta)</small>' : '');
+                $nick_u = sb_prezdivky_uctu($r->ID)[intval($rid)] ?? '';
+                $pozn = ($nick_u !== '' && (isset($vedouci_karta[intval($rid)]) || in_array(intval($rid), $uid_clenove_karta, true)) ? ' (' . esc_html($nick_u) . ')' : '')
+                      . (isset($vedouci_karta[intval($rid)]) ? ' <small style="color:#0b5394;">(vedoucí)</small>'
+                      : (in_array(intval($rid), $uid_clenove_karta, true) ? ' <small style="color:#0b5394;">(člen skauta)</small>' : ''));
                 $rodice_html[] = sb_format_rodic_jmeno($u) . $pozn;
                 $hledat[]      = mb_strtolower($plne_jmeno($u));
             }
@@ -4522,7 +4557,7 @@ function sb_prehled_rodin() {
         // Štítky jen pro dospělé členy bez účtu (členové s účtem a vedoucí jsou označeni u rodičů)
         foreach (sb_dospeli_rodiny($r->ID) as $d) {
             if (!empty($d['uid'])) continue;
-            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html(sb_dospely_jmeno($d)) . " <small>(dospělý člen bez účtu)</small></span>";
+            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html(sb_dospely_jmeno($d)) . (!empty($d['prezdivka']) ? ' (' . esc_html($d['prezdivka']) . ')' : '') . " <small>(dospělý člen bez účtu)</small></span>";
         }
         foreach ($archiv_deti as $d) {
             if (!is_array($d)) continue;
@@ -4564,8 +4599,10 @@ function sb_prehled_rodin() {
                     echo "<label style='font-weight:normal;'><input type='checkbox' name='rodice[]' value='" . esc_attr($u->ID) . "'" . ($je_clen ? " checked" : "") . "> " . sb_format_rodic_jmeno($u) . "</label>";
                     if ($je_clen && isset($vedouci_ucty[$u->ID])) {
                         echo "<span class='sb-text-hint'>vedoucí – člen skauta automaticky</span>";
+                        echo "<input type='text' name='rodic_prezdivka[" . intval($u->ID) . "]' value='" . esc_attr(sb_prezdivky_uctu($r->ID)[$u->ID] ?? '') . "' maxlength='50' placeholder='přezdívka' style='width:110px; font-size:12px;'>";
                     } elseif ($je_clen) {
                         echo "<label style='font-weight:normal; font-size:12px; color:#0b5394;'><input type='checkbox' name='rodic_clen[]' value='" . esc_attr($u->ID) . "'" . (in_array(intval($u->ID), $clenove_ucty, true) ? " checked" : "") . "> dospělý člen skauta (platí příspěvek)</label>";
+                        echo "<input type='text' name='rodic_prezdivka[" . intval($u->ID) . "]' value='" . esc_attr(sb_prezdivky_uctu($r->ID)[$u->ID] ?? '') . "' maxlength='50' placeholder='přezdívka' style='width:110px; font-size:12px;'>";
                     }
                     echo "</div>";
                 }
@@ -4620,6 +4657,7 @@ function sb_prehled_rodin() {
                     if (!empty($d['uid'])) continue; // člen s účtem se značí v seznamu Rodiče
                     echo "<div class='sb-dite-row'>";
                     echo "<input type='text' name='dospely_jmeno[" . intval($di) . "]' value='" . esc_attr($d['jmeno']) . "' maxlength='100'>";
+                    echo "<input type='text' name='dospely_prezdivka[" . intval($di) . "]' value='" . esc_attr($d['prezdivka'] ?? '') . "' maxlength='50' placeholder='přezdívka'>";
                     echo "<span class='sb-text-hint'>člen od roku " . intval($d['od_roku'] ?? 0) . "</span>";
                     echo "<label class='sb-nechodi'><input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
                     echo "</div>";

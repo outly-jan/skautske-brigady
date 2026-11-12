@@ -634,5 +634,20 @@ update_option('sb_prispevky', [$cil => ['1' => 1200, '2' => 1100, '3' => 1000, '
 $i = sb_prispevek_rodiny($hm, $cil);
 ok(sb_platba_zprava($i) === "Poplatek $cil Hušek Michal", 've zprávě pro příjemce přezdívka není');
 
+echo "== 21. Přezdívky dospělých členů v rodině ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11'], 'rodic_prezdivka' => ['11' => 'Raketa'], 'novy_dospely' => 'Bezúčtová Marie (Mája)']);
+$_POST = []; $h = sb_prehled_rodin();
+$k = substr($h, strpos($h, "id='sb-rodina-100'"), 12000); $hl = substr($k, 0, strpos($k, 'Upravit'));
+ok(strpos($hl, 'Nováková Jana (Raketa) <small style="color:#0b5394;">(člen skauta)</small>') !== false, 'přezdívka rodiče s účtem je na kartě u jména');
+ok(strpos($hl, 'Bezúčtová Marie (Mája) <small>(dospělý člen bez účtu)</small>') !== false && sb_dospeli_rodiny(100)[1]['jmeno'] === 'Bezúčtová Marie', 'přezdívka člena bez účtu ze závorky');
+ok(strpos($k, "name='rodic_prezdivka[11]' value='Raketa'") !== false && strpos($k, "name='dospely_prezdivka[1]' value='Mája'") !== false, 'přezdívky jdou v kartě upravit');
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11'], 'rodic_prezdivka' => ['11' => ''], 'dospely_jmeno' => ['1' => 'Bezúčtová Marie'], 'dospely_prezdivka' => ['1' => 'Majka']]);
+ok(!isset(sb_prezdivky_uctu(100)[11]) && sb_dospeli_rodiny(100)[1]['prezdivka'] === 'Majka', 'přezdívku jde změnit i smazat');
+$o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
+$ulozit($o, ['rodic_clen_form' => '1', 'rodic_clen' => ['11'], 'rodic_prezdivka' => ['11' => 'Raketa']]);
+$ja = sb_najdi_dospeleho_dle_jmena('Nováková Jana'); $ma = sb_najdi_dospeleho_dle_jmena('Bezúčtová Marie');
+ok($ja && get_post_meta($ja->ID, 'sb_prezdivka') === 'Raketa' && $ma && get_post_meta($ma->ID, 'sb_prezdivka') === 'Majka', 'při osamostatnění se přezdívky přenesou');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
