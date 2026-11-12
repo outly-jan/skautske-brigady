@@ -4173,13 +4173,28 @@ function sb_prehled_rodin() {
                                 // Oprava jména (překlep)
                                 if (isset($jmena_post[$di])) {
                                     $opr = mb_substr(trim(preg_replace('/\s*\([^)]*\)/u', '', sanitize_text_field(wp_unslash((string) $jmena_post[$di])))), 0, 100);
-                                    if ($opr !== '') $d['jmeno'] = $opr;
+                                    if ($opr !== '') {
+                                        $d['jmeno'] = $opr;
+                                    } elseif (intval($d['od_roku'] ?? 0) >= $od_roku) {
+                                        continue; // vymazané jméno u člena zadaného v této revizi = odebrat
+                                    }
                                 }
+                                // stejné jméno dvakrát (např. po obnovení stránky) = jen jednou
+                                $klice_nove = array_map(function($x) { return sb_jmeno_klic($x['jmeno']); }, $dosp_nove);
+                                if (in_array(sb_jmeno_klic($d['jmeno']), $klice_nove, true)) continue;
                                 $dosp_nove[] = $d;
                             }
                         }
                         $novy_dosp = trim(preg_replace('/\s*\([^)]*\)/u', '', sanitize_text_field(wp_unslash($_POST['novy_dospely'] ?? ''))));
-                        if ($novy_dosp !== '') $dosp_nove[] = ['jmeno' => mb_substr($novy_dosp, 0, 100), 'od_roku' => $od_roku];
+                        if ($novy_dosp !== '') {
+                            $klice_nove = array_map(function($x) { return sb_jmeno_klic($x['jmeno']); }, $dosp_nove);
+                            $klice_vedouci = array_map('sb_jmeno_klic', sb_vedouci_rodice($id));
+                            if (in_array(sb_jmeno_klic($novy_dosp), array_merge($klice_nove, $klice_vedouci), true)) {
+                                $zprava .= sb_alert(esc_html($novy_dosp) . ' už je dospělým členem této rodiny – podruhé se nepřidává.', 'info');
+                            } else {
+                                $dosp_nove[] = ['jmeno' => mb_substr($novy_dosp, 0, 100), 'od_roku' => $od_roku];
+                            }
+                        }
                         if ($dosp_nove) update_post_meta($id, 'dospeli_clenove', array_values($dosp_nove)); else delete_post_meta($id, 'dospeli_clenove');
                         if ($dosp_archiv) update_post_meta($id, 'dospeli_archiv', array_values($dosp_archiv));
 
@@ -4504,7 +4519,7 @@ function sb_prehled_rodin() {
                 echo "<div class='sb-rod-sekce'>Dospělí členové v rodině (rodič, který je sám členem skauta)</div>";
                 foreach (sb_dospeli_rodiny($r->ID) as $di => $d) {
                     echo "<div class='sb-dite-row'>";
-                    echo "<input type='text' name='dospely_jmeno[" . intval($di) . "]' value='" . esc_attr($d['jmeno']) . "' maxlength='100' required>";
+                    echo "<input type='text' name='dospely_jmeno[" . intval($di) . "]' value='" . esc_attr($d['jmeno']) . "' maxlength='100'>";
                     echo "<span class='sb-text-hint'>člen od roku " . intval($d['od_roku'] ?? 0) . "</span>";
                     echo "<label class='sb-nechodi'><input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
                     echo "</div>";

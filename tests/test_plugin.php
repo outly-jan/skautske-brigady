@@ -550,5 +550,14 @@ update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Starý Člen', 'od_roku' 
 $ulozit($oba, ['dospely_konci' => ['0']]);
 ok(sb_dospeli_archiv(100)[0]['do_roku'] === $cil && sb_dospeli_pro_rok(100, $tato) === ['Starý Člen'] && sb_dospeli_pro_rok(100, $cil) === [], 'dřívější člen se ukončí archivací (letos platí, od příštího roku ne)');
 
+$ulozit($oba, ['novy_dospely' => 'Malíková Lenka']);
+$ulozit($oba, ['novy_dospely' => 'Malíková Lenka']);   // F5 – stejný formulář znovu
+ok(count(sb_dospeli_rodiny(100)) === 1, 'obnovení stránky nepřidá stejného dospělého člena podruhé');
+update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Malíková Lenka', 'od_roku' => $cil], ['jmeno' => 'Malíková Lenka', 'od_roku' => $cil]]);
+$ulozit($oba, ['dospely_jmeno' => ['0' => 'Masopustová Lenka', '1' => '']]);
+ok(sb_dospeli_rodiny(100) === [['jmeno' => 'Masopustová Lenka', 'od_roku' => $cil]] && sb_dospeli_archiv(100) !== null && count(array_filter(sb_dospeli_archiv(100), fn($a) => $a['jmeno'] === 'Malíková Lenka')) === 0, 'vymazané jméno u nového člena = odebrán, nic v archivu');
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos($h, "name='dospely_jmeno[0]' value='Masopustová Lenka' maxlength='100' required") === false, 'pole jména není povinné (jde vymazat)');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
