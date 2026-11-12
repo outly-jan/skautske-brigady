@@ -1888,7 +1888,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('nova')">📘 Návod</button>
             <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
             <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
-            <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů</button>
+            <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů (bez dětí ve skautu)</button>
             <button onclick="sbShowSection('upravit_pozadavky')">📅 Nastavit požadavky dle roku</button>
             <button onclick="sbShowSection('upravit_brigady')">🛠️ Vytvoření a správa brigád</button>
             <button onclick="sbShowSection('upravit_ucastniky')">🧮 Správa účastníků</button>
@@ -1900,7 +1900,7 @@ if (array_intersect($roles, $allowed_limited)) {
     <button onclick="sbShowSection('napoveda')">📘 Nápověda</button>
     <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
     <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
-    <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů</button>
+    <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů (bez dětí ve skautu)</button>
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
     <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
     <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
@@ -3173,7 +3173,7 @@ function sb_sprava_dospelych() {
     }
 
     ob_start();
-    echo "<h3 class='sb-section-title'>🧑 Správa dospělých členů</h3>";
+    echo "<h3 class='sb-section-title'>🧑 Správa dospělých členů (bez dětí ve skautu)</h3>";
     echo $zprava;
     if ($revize['otevrena']) {
         echo sb_alert('Revize je otevřená. Změny (konec členství, přechod do rodiny) se projeví od roku ' . intval($revize['rok']) . '.', 'warning');
