@@ -537,5 +537,18 @@ ok(sb_platba_zprava($b) === 'Poplatek 2027 Petr, Josef, Vojtěch, Jana, dar 500'
 $b = ['rok' => 2027, 'dar' => 1000, 'rodina' => 'Novákovi', 'jmena' => ['Svobodová Anna Kristýna', 'Dvořák Tadeáš Bartoloměj', 'Novák Maximilián Ondřej']];
 ok(sb_platba_zprava($b) === 'Poplatek 2027 Novákovi: Anna, Tadeáš, Maximilián, dar 1000', 'příjmení mimo název rodiny: první slovo po příjmení (' . sb_platba_zprava($b) . ')');
 
+echo "== 17. Oprava a odebrání dospělého člena v rodině ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$ulozit($oba, ['novy_dospely' => 'Malíková Lenka']);
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos($h, "name='dospely_jmeno[0]' value='Malíková Lenka'") !== false, 'jméno dospělého člena je v kartě rodiny editovatelné');
+$ulozit($oba, ['dospely_jmeno' => ['0' => 'Masopustová Lenka (Lenka)']]);
+ok(sb_dospeli_rodiny(100)[0]['jmeno'] === 'Masopustová Lenka' && sb_dospeli_rodiny(100)[0]['od_roku'] === $cil, 'překlep ve jméně jde opravit (přezdívka se odstraní, rok zůstává)');
+$ulozit($oba, ['dospely_konci' => ['0']]);
+ok(sb_dospeli_rodiny(100) === [] && sb_dospeli_archiv(100) === [], 'člen zadaný omylem v téže revizi se odebere úplně (bez archivu)');
+update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Starý Člen', 'od_roku' => $tato - 1]]);
+$ulozit($oba, ['dospely_konci' => ['0']]);
+ok(sb_dospeli_archiv(100)[0]['do_roku'] === $cil && sb_dospeli_pro_rok(100, $tato) === ['Starý Člen'] && sb_dospeli_pro_rok(100, $cil) === [], 'dřívější člen se ukončí archivací (letos platí, od příštího roku ne)');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

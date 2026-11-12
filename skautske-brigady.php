@@ -4162,10 +4162,19 @@ function sb_prehled_rodin() {
                         $dosp_archiv = sb_dospeli_archiv($id);
                         $konci = (isset($_POST['dospely_konci']) && is_array($_POST['dospely_konci'])) ? array_map('intval', $_POST['dospely_konci']) : [];
                         $dosp_nove = [];
+                        $jmena_post = (isset($_POST['dospely_jmeno']) && is_array($_POST['dospely_jmeno'])) ? $_POST['dospely_jmeno'] : [];
                         foreach ($dosp as $di => $d) {
                             if (in_array($di, $konci, true)) {
-                                $dosp_archiv[] = ['jmeno' => $d['jmeno'], 'od_roku' => intval($d['od_roku'] ?? 0), 'do_roku' => $od_roku, 'datum' => $dnes];
+                                // Zadáno v téže revizi (ještě neplatí) = omyl → smazat; jinak ukončit členství (archiv)
+                                if (intval($d['od_roku'] ?? 0) < $od_roku) {
+                                    $dosp_archiv[] = ['jmeno' => $d['jmeno'], 'od_roku' => intval($d['od_roku'] ?? 0), 'do_roku' => $od_roku, 'datum' => $dnes];
+                                }
                             } else {
+                                // Oprava jména (překlep)
+                                if (isset($jmena_post[$di])) {
+                                    $opr = mb_substr(trim(preg_replace('/\s*\([^)]*\)/u', '', sanitize_text_field(wp_unslash((string) $jmena_post[$di])))), 0, 100);
+                                    if ($opr !== '') $d['jmeno'] = $opr;
+                                }
                                 $dosp_nove[] = $d;
                             }
                         }
@@ -4494,7 +4503,11 @@ function sb_prehled_rodin() {
                 // Dospělí členové rodiny (rodiče, kteří jsou sami členy skauta)
                 echo "<div class='sb-rod-sekce'>Dospělí členové v rodině (rodič, který je sám členem skauta)</div>";
                 foreach (sb_dospeli_rodiny($r->ID) as $di => $d) {
-                    echo "<label class='sb-rod-check'>" . esc_html($d['jmeno']) . " <span class='sb-text-hint'>(člen od roku " . intval($d['od_roku'] ?? 0) . ")</span> &nbsp; <input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
+                    echo "<div class='sb-dite-row'>";
+                    echo "<input type='text' name='dospely_jmeno[" . intval($di) . "]' value='" . esc_attr($d['jmeno']) . "' maxlength='100' required>";
+                    echo "<span class='sb-text-hint'>člen od roku " . intval($d['od_roku'] ?? 0) . "</span>";
+                    echo "<label class='sb-nechodi'><input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
+                    echo "</div>";
                 }
                 foreach (sb_vedouci_rodice($r->ID) as $j) {
                     echo "<div class='sb-rod-check'>" . esc_html($j) . " <span class='sb-text-hint'>(vedoucí – člen automaticky, nezadávejte)</span></div>";
