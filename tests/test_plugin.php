@@ -463,7 +463,7 @@ update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Petr Novák', 'od_roku' =
 ok(count(sb_dospeli_pro_rok(100, $cil)) === 1, 'zadaný ručně i automaticky (jiné pořadí slov) = počítá se jen jednou');
 delete_post_meta(100, 'dospeli_clenove');
 $_POST = []; $h = sb_prehled_rodin();
-ok(strpos($h, 'vedoucí – člen automaticky') !== false, 'na kartě rodiny je vidět „vedoucí – člen automaticky"');
+ok(strpos($h, 'Novák Petr <small style="color:#0b5394;">(vedoucí)</small>') !== false, 'na kartě rodiny je u rodiče vidět „(vedoucí)"');
 // osamostatnění vedoucího s účtem po odchodu dětí
 $o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
 $ulozit($o);
@@ -596,6 +596,20 @@ $o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
 $ulozit($o, ['rodic_clen_form' => '1', 'rodic_clen' => ['11']]);
 $ja = sb_najdi_dospeleho_dle_jmena('Nováková Jana');
 ok($ja && get_post_meta($ja->ID, 'rodice_rodiny') === [11], 'po archivaci rodiny se člen s účtem osamostatní i s účtem');
+
+echo "== 19. Karta rodiny: člen skauta jen jednou ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$ulozit($oba, ['rodic_clen_form' => '1', 'rodic_clen' => ['11'], 'novy_dospely' => 'Bezúčtová Marie']);
+$_POST = []; $h = sb_prehled_rodin();
+$k = substr($h, strpos($h, "id='sb-rodina-100'"), 3000);
+$k = substr($k, 0, strpos($k, 'Upravit'));
+ok(strpos($k, 'Nováková Jana <small style="color:#0b5394;">(člen skauta)</small>') !== false && substr_count($k, 'Nováková Jana') === 1, 'rodič-člen s účtem je na kartě jen jednou, v řádku rodičů „(člen skauta)"');
+ok(strpos($k, 'Bezúčtová Marie <small>(dospělý člen bez účtu)</small>') !== false, 'člen bez účtu má štítek „dospělý člen bez účtu"');
+// Masopustová si založí účet: ruční záznam se převede na účet
+user(40, 'Marie', 'Bezúčtová', 'marie@example.cz');
+$ulozit($oba, ['rodice' => ['11', '12', '40'], 'rodic_clen_form' => '1', 'rodic_clen' => ['11', '40']]);
+$d = sb_dospeli_rodiny(100);
+ok(count($d) === 2 && count(array_filter($d, fn($x) => ($x['uid'] ?? 0) === 40)) === 1 && sb_dospeli_pro_rok(100, $cil) === ['Nováková Jana', 'Bezúčtová Marie'], 'po založení účtu a zaškrtnutí se ruční záznam převede na účet (žádný duplikát)');
 
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

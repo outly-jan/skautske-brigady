@@ -4239,7 +4239,16 @@ function sb_prehled_rodin() {
                                 }
                             }
                             foreach ($chci as $cuid) {
-                                if (!in_array($cuid, $ma, true)) $upraveno[] = ['jmeno' => sb_jmeno_uctu(get_userdata($cuid)), 'uid' => $cuid, 'od_roku' => $od_roku];
+                                if (in_array($cuid, $ma, true)) continue;
+                                // Byl už zadán ručně (bez účtu) pod stejným jménem? → převést záznam na účet (rok zůstává)
+                                $klic_uctu = sb_jmeno_klic(sb_jmeno_uctu(get_userdata($cuid)));
+                                $nalezen = false;
+                                foreach ($upraveno as $ui => $ud) {
+                                    if (empty($ud['uid']) && sb_jmeno_klic($ud['jmeno']) === $klic_uctu) {
+                                        $upraveno[$ui]['uid'] = $cuid; $nalezen = true; break;
+                                    }
+                                }
+                                if (!$nalezen) $upraveno[] = ['jmeno' => sb_jmeno_uctu(get_userdata($cuid)), 'uid' => $cuid, 'od_roku' => $od_roku];
                             }
                             $dosp_nove = $upraveno;
                         }
@@ -4459,10 +4468,15 @@ function sb_prehled_rodin() {
 
         $rodice_html = [];
         $hledat      = [mb_strtolower($r->post_title)];
+        $uid_clenove_karta = [];
+        foreach (sb_dospeli_rodiny($r->ID) as $d) if (!empty($d['uid'])) $uid_clenove_karta[] = intval($d['uid']);
+        $vedouci_karta = sb_vedouci_rodice($r->ID);
         foreach ($prirazeni as $rid) {
             $u = get_userdata(intval($rid));
             if ($u) {
-                $rodice_html[] = sb_format_rodic_jmeno($u);
+                $pozn = isset($vedouci_karta[intval($rid)]) ? ' <small style="color:#0b5394;">(vedoucí)</small>'
+                      : (in_array(intval($rid), $uid_clenove_karta, true) ? ' <small style="color:#0b5394;">(člen skauta)</small>' : '');
+                $rodice_html[] = sb_format_rodic_jmeno($u) . $pozn;
                 $hledat[]      = mb_strtolower($plne_jmeno($u));
             }
         }
@@ -4486,14 +4500,10 @@ function sb_prehled_rodin() {
             echo "<span class='sb-chip'>" . esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " <small>(" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ")</small></span>";
         }
         $klice_rucni = [];
-        $uid_clenove = [];
+        // Štítky jen pro dospělé členy bez účtu (členové s účtem a vedoucí jsou označeni u rodičů)
         foreach (sb_dospeli_rodiny($r->ID) as $d) {
-            if (!empty($d['uid'])) $uid_clenove[] = intval($d['uid']); else $klice_rucni[] = sb_jmeno_klic($d['jmeno']);
-            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html(sb_dospely_jmeno($d)) . " <small>(dospělý člen)</small></span>";
-        }
-        foreach (sb_vedouci_rodice($r->ID) as $vuid => $j) {
-            if (in_array($vuid, $uid_clenove, true) || in_array(sb_jmeno_klic($j), $klice_rucni, true)) continue;
-            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html($j) . " <small>(vedoucí – člen automaticky)</small></span>";
+            if (!empty($d['uid'])) continue;
+            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html(sb_dospely_jmeno($d)) . " <small>(dospělý člen bez účtu)</small></span>";
         }
         foreach ($archiv_deti as $d) {
             if (!is_array($d)) continue;
