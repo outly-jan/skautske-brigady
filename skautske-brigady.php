@@ -2022,7 +2022,7 @@ if (array_intersect($roles, $allowed_limited)) {
                 <h5>🧑 <b>Dospělí členové</b></h5>
                 <ul>
                     <li><strong>Dítě dospělo</strong> – ve Správě rodin u dítěte zaškrtni <strong>Dospělý člen</strong>: od příštího roku odejde z rodiny a vznikne samostatný dospělý člen (najdeš ho v záložce <strong>Správa dospělých členů</strong>)</li>
-                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Rodiče zaškrtni <strong>je členem skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
+                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Účty na webu zaškrtni <strong>dospělý člen skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li>Omylem zaškrtnuté „Dospělý člen“ vrátíš v kartě rodiny volbou <em>Vrátit do rodiny (byl to omyl)</em> – samostatný záznam se zruší</li>
                     <li>Když rodině nezůstane žádné dítě, rodina se automaticky archivuje a dospělí členové v ní se stanou samostatnými dospělými členy</li>
@@ -2995,7 +2995,7 @@ function sb_napoveda_vedouci() {
             <li>Klikněte na <strong>💾 Uložit rodinu</strong>. Karta se sbalí a krátce se zeleně orámuje – uloženo.</li>
         </ol>
         <p><strong>Dítěti je 18 a zůstává ve skautu?</strong> Zaškrtněte místo toho <strong>Dospělý člen</strong> – od příštího roku bude vedeno samostatně v záložce <em>Správa dospělých členů</em>.</p>
-        <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Rodiče <em>je členem skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
+        <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Účty na webu <em>dospělý člen skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
         <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>
@@ -4551,7 +4551,7 @@ function sb_prehled_rodin() {
                 echo "<div class='sb-rod-sekce'>Název rodiny</div>";
                 echo "<input type='text' name='novy_nazev' value='" . esc_attr($r->post_title) . "' required style='width:100%; max-width:100%;'>";
 
-                echo "<div class='sb-rod-sekce'>Rodiče</div>";
+                echo "<div class='sb-rod-sekce'>Účty na webu (rodiče, případně dítě s vlastním účtem)</div>";
                 $vedouci_ucty = sb_vedouci_rodice($r->ID);
                 $clenove_ucty = [];
                 foreach (sb_dospeli_rodiny($r->ID) as $d) if (!empty($d['uid'])) $clenove_ucty[] = intval($d['uid']);
@@ -4565,7 +4565,7 @@ function sb_prehled_rodin() {
                     if ($je_clen && isset($vedouci_ucty[$u->ID])) {
                         echo "<span class='sb-text-hint'>vedoucí – člen skauta automaticky</span>";
                     } elseif ($je_clen) {
-                        echo "<label style='font-weight:normal; font-size:12px; color:#0b5394;'><input type='checkbox' name='rodic_clen[]' value='" . esc_attr($u->ID) . "'" . (in_array(intval($u->ID), $clenove_ucty, true) ? " checked" : "") . "> je členem skauta</label>";
+                        echo "<label style='font-weight:normal; font-size:12px; color:#0b5394;'><input type='checkbox' name='rodic_clen[]' value='" . esc_attr($u->ID) . "'" . (in_array(intval($u->ID), $clenove_ucty, true) ? " checked" : "") . "> dospělý člen skauta (platí příspěvek)</label>";
                     }
                     echo "</div>";
                 }
