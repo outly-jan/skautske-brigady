@@ -448,5 +448,55 @@ ok(!$mimo && strpos($h, 'uzavřené') !== false, 'vedoucí mimo revizi dospělé
 $GLOBALS['roles'] = ['rodic'];
 ok(strpos(sb_sprava_dospelych(), 'Nemáš oprávnění') !== false, 'rodič do Správy dospělých nesmí');
 
+echo "== 15. Vedoucí jako členové a opravy z review ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+update_option('sb_prispevky', [$cil => ['1' => 1200, '2' => 1100, '3' => 1000, 'dosp' => 1500, 'ucet' => '2300221146/2010', 'od' => date('Y-m-d', strtotime('-1 day')), 'do' => date('Y-m-d', strtotime('+30 days'))]]);
+$GLOBALS['users'][12]->roles = ['rodic', 'author'];   // Petr Novák je vedoucí
+ok(sb_dospeli_pro_rok(100, $cil) === ['Novák Petr'], 'rodič-vedoucí je automaticky dospělým členem rodiny');
+ok(sb_prispevek_rodiny(get_post(100), $cil)['zaklad_dospeli'] === 1500, 'jeho příspěvek se rodině přičte');
+update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Petr Novák', 'od_roku' => $cil]]);
+ok(count(sb_dospeli_pro_rok(100, $cil)) === 1, 'zadaný ručně i automaticky (jiné pořadí slov) = počítá se jen jednou');
+delete_post_meta(100, 'dospeli_clenove');
+$_POST = []; $h = sb_prehled_rodin();
+ok(strpos($h, 'vedoucí – člen automaticky') !== false, 'na kartě rodiny je vidět „vedoucí – člen automaticky"');
+// osamostatnění vedoucího s účtem po odchodu dětí
+$o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
+$ulozit($o);
+$petr = null; foreach ($GLOBALS['posts'] as $p) if ($p->post_title === 'Novák Petr' && sb_je_dospely($p->ID)) $petr = $p;
+ok($petr && get_post_meta($petr->ID, 'rodice_rodiny') === [12] && !in_array(12, get_post_meta(100, 'rodice_rodiny')), 'vedoucí se osamostatní i s účtem na webu (uvidí své Moje brigády)');
+// review 3: ručně zadaný člen převezme účet podle jména
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+update_post_meta(100, 'dospeli_clenove', [['jmeno' => 'Nováková Jana', 'od_roku' => $cil]]);
+$o = $oba; $o[0]['nechodi'] = '1'; $o[1]['nechodi'] = '1';
+$ulozit($o);
+$jana = null; foreach ($GLOBALS['posts'] as $p) if ($p->post_title === 'Nováková Jana' && sb_je_dospely($p->ID)) $jana = $p;
+ok($jana && get_post_meta($jana->ID, 'rodice_rodiny') === [11] && sb_emaily_prispevku($jana->ID) === ['jana@example.cz'], 'rodič-člen po archivaci rodiny převezme svůj účet i e-mail');
+// review 2: rodič s vlastním záznamem nejde přidat do rodiny
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$x = sb_vytvorit_dospeleho('Novák Petr', [], null);
+$h = $ulozit($oba, ['novy_dospely' => 'Novák Petr']);
+ok(sb_dospeli_rodiny(100) === [] && strpos($h, 'Stal se rodičem') !== false, 'člena s vlastním záznamem nelze přidat do rodiny (jinak by platil dvakrát)');
+// review 1: obnovení po „Stal se rodičem"
+$GLOBALS['roles'] = ['administrator'];
+$_POST = ['sb_dosp_rodic' => '1', '_wpnonce_dospeli' => 'tok', 'edit_dospely_id' => (string) $x, 'dosp_cil' => '100'];
+sb_sprava_dospelych();
+$_POST = ['sb_dosp_obnovit' => '1', '_wpnonce_dospeli' => 'tok', 'edit_dospely_id' => (string) $x];
+$h = sb_sprava_dospelych();
+ok(sb_rodina_archiv($x) !== null && strpos($h, 'počítal(a) dvakrát') !== false, 'obnovení po „Stal se rodičem" se zablokuje, dokud je člověk členem rodiny');
+// review 4: omylem „Dospělý člen" → vrátit
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]);
+$o = $oba; $o[1]['dospely'] = '1';
+$ulozit($o);
+$tom = sb_najdi_dospeleho_dle_jmena('Novák Tomáš');
+ok($tom !== null, 'omylem vznikl samostatný člen');
+$h = $ulozit([0 => $oba[0]], ['obnovit' => ['0']]);
+ok(sb_najdi_dospeleho_dle_jmena('Novák Tomáš') === null && get_post($tom->ID) === null && count(get_post_meta(100, 'deti_rodiny')) === 2, 'omyl jde vrátit: dítě zpět v rodině, záznam dospělého zrušen');
+// review 5: Správa rodin neupraví dospělého
+$y = sb_vytvorit_dospeleho('Samostatný Karel', [], null);
+$_POST = ['edit_rodina_id' => (string) $y, 'ulozit_rodinu' => '1', '_wpnonce_ulozit_rodinu' => 'tok', 'novy_nazev' => 'X', 'deti' => [0 => ['jmeno' => 'Dítě', 'oddil' => 'Skauti']]];
+$h = sb_prehled_rodin();
+ok(get_post_meta($y, 'deti_rodiny') === '' && strpos($h, 'nebyla nalezena') !== false, 'Správa rodin odmítne záznam dospělého člena');
+ok(strpos(sb_prispevek_email(get_post($y), ['rok' => $cil, 'je_dospely' => true, 'deti' => 0, 'dospeli' => 1, 'dospeli_jmena' => ['Samostatný Karel'], 'za_dospeleho' => 1500, 'zaklad_dospeli' => 1500, 'zaklad' => 1500, 'brigady' => ['v_roce' => false, 'pozadavek' => 0, 'castka' => 0], 'dar' => 0, 'celkem' => 1500, 'stav' => 'nezaplaceno', 'zaplaceno' => 0, 'zbyva' => 1500, 'jmena' => [], 'jmena_qr' => ['Samostatný Karel'], 'rodina' => '', 'ucet' => '2300221146/2010', 'platby' => []])['html'], '<p>Ahoj,</p>') !== false, 'e-mail dospělému začíná „Ahoj,"');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

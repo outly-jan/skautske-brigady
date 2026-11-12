@@ -360,7 +360,7 @@ function sb_rodina_v_roce($rodina, $rok) {
 }
 
 // Vytvoří samostatnou jednotku „dospělý člen" (od roku $od_roku, nebo dle data vzniku, je-li null).
-function sb_vytvorit_dospeleho($jmeno, $rodice = [], $od_roku = null) {
+function sb_vytvorit_dospeleho($jmeno, $rodice = [], $od_roku = null, $z_rodiny = 0) {
     $jmeno = trim(preg_replace('/\s*\([^)]*\)/u', '', (string) $jmeno));
     if ($jmeno === '') return 0;
     $nazev = $jmeno; $i = 2;
@@ -370,9 +370,20 @@ function sb_vytvorit_dospeleho($jmeno, $rodice = [], $od_roku = null) {
         update_post_meta($id, 'sb_typ', 'dospely');
         update_post_meta($id, 'rodice_rodiny', array_values(array_map('intval', (array) $rodice)));
         if ($od_roku) update_post_meta($id, 'sb_od_roku', intval($od_roku));
+        if ($z_rodiny) update_post_meta($id, 'sb_z_rodiny', intval($z_rodiny));
         return intval($id);
     }
     return 0;
+}
+
+// Aktivní samostatný dospělý člen se stejným jménem (pro kontrolu dvojí evidence), nebo null.
+function sb_najdi_dospeleho_dle_jmena($jmeno) {
+    $k = sb_jmeno_klic($jmeno);
+    if ($k === '') return null;
+    foreach (get_posts(['post_type' => 'rodina', 'numberposts' => -1]) as $r) {
+        if (sb_je_dospely($r->ID) && !sb_rodina_archiv($r->ID) && sb_jmeno_klic($r->post_title) === $k) return $r;
+    }
+    return null;
 }
 
 // Vysvětlující věta pro rodinu, na kterou se požadavky v daném roce nevztahují (HTML).
@@ -381,6 +392,10 @@ function sb_poznamka_mimo_rok($rodina, $rok) {
     $archiv = sb_rodina_archiv($rodina->ID);
     if ($archiv && intval($archiv['od_roku']) <= $rok) {
         return 'Rodina je od roku ' . intval($archiv['od_roku']) . ' vedena v archivu (děti už skauta nenavštěvují). Požadavky se pro ni od tohoto roku nepočítají.';
+    }
+    $od = intval(get_post_meta($rodina->ID, 'sb_od_roku', true));
+    if (sb_je_dospely($rodina->ID) && $od > $rok) {
+        return 'Jako samostatný dospělý člen se počítáte od roku ' . $od . '.';
     }
     return 'Rodina vznikla po 31. 8. ' . $rok . ' — patří do sezóny ' . $rok . '/' . ($rok + 1) . '. Požadavky platí od roku ' . ($rok + 1) . ' a hodiny odpracované v roce ' . $rok . ' se do něj převedou.';
 }
@@ -849,7 +864,30 @@ function sb_dospeli_archiv($rodina_id) {
     return is_array($d) ? array_values(array_filter($d, 'is_array')) : [];
 }
 
-// Jména dospělých členů rodiny, za které se v roce $rok platí příspěvek.
+// Rodiče s účtem, kteří jsou vedoucí (role author) – jsou automaticky i dospělými členy: [user_id => 'Příjmení Jméno']
+function sb_vedouci_rodice($rodina_id) {
+    $vysl = [];
+    $rodice = get_post_meta($rodina_id, 'rodice_rodiny', true);
+    if (!is_array($rodice)) return $vysl;
+    foreach ($rodice as $uid) {
+        $u = get_userdata(intval($uid));
+        if ($u && in_array('author', (array) ($u->roles ?? []), true)) {
+            $j = trim(($u->last_name ?? '') . ' ' . ($u->first_name ?? ''));
+            $vysl[intval($uid)] = $j !== '' ? $j : (string) $u->display_name;
+        }
+    }
+    return $vysl;
+}
+
+// Porovnatelný tvar jména (bez ohledu na velikost písmen a pořadí slov).
+function sb_jmeno_klic($j) {
+    $w = preg_split('/\s+/u', mb_strtolower(trim(preg_replace('/\s*\([^)]*\)/u', '', (string) $j))), -1, PREG_SPLIT_NO_EMPTY);
+    sort($w);
+    return implode(' ', $w);
+}
+
+// Jména dospělých členů rodiny, za které se v roce $rok platí příspěvek
+// (zadaní ručně + automaticky rodiče, kteří jsou vedoucí).
 function sb_dospeli_pro_rok($rodina_id, $rok) {
     $rok = intval($rok); $jmena = [];
     foreach (sb_dospeli_rodiny($rodina_id) as $d) {
@@ -857,6 +895,10 @@ function sb_dospeli_pro_rok($rodina_id, $rok) {
     }
     foreach (sb_dospeli_archiv($rodina_id) as $d) {
         if (!empty($d['jmeno']) && intval($d['od_roku'] ?? 0) <= $rok && intval($d['do_roku'] ?? 0) > $rok) $jmena[] = $d['jmeno'];
+    }
+    $klice = array_map('sb_jmeno_klic', $jmena);
+    foreach (sb_vedouci_rodice($rodina_id) as $j) {
+        if (!in_array(sb_jmeno_klic($j), $klice, true)) { $jmena[] = $j; $klice[] = sb_jmeno_klic($j); }
     }
     return $jmena;
 }
@@ -1090,7 +1132,7 @@ function sb_prispevek_email($rodina, $info) {
     $url = esc_url(sb_moje_brigady_url());
     $h  = "<div style='font-family:Arial,Helvetica,sans-serif; font-size:14px; color:#222; max-width:640px;'>";
     if (!empty($info['je_dospely'])) {
-        $h .= "<p>Dobrý den,</p>";
+        $h .= "<p>Ahoj,</p>";
         $h .= "<p>posíláme podklady pro úhradu <strong>členského příspěvku na rok $rok</strong> – <strong>" . esc_html($rodina->post_title) . "</strong>.</p>";
     } else {
         $h .= "<p>Milí rodiče,</p>";
@@ -1876,7 +1918,8 @@ if (array_intersect($roles, $allowed_limited)) {
                 <h5>🧑 <b>Dospělí členové</b></h5>
                 <ul>
                     <li><strong>Dítě dospělo</strong> – ve Správě rodin u dítěte zaškrtni <strong>Dospělý člen</strong>: od příštího roku odejde z rodiny a vznikne samostatný dospělý člen (najdeš ho v záložce <strong>Správa dospělých členů</strong>)</li>
-                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin ho přidej do „Dospělí členové v rodině“: rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu)</li>
+                    <li><strong>Rodič je sám členem</strong> – ve Správě rodin ho přidej do „Dospělí členové v rodině“: rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) je dospělým členem automaticky</strong> – nezadávej ho</li>
+                    <li>Omylem zaškrtnuté „Dospělý člen“ vrátíš v kartě rodiny volbou <em>Vrátit do rodiny (byl to omyl)</em> – samostatný záznam se zruší</li>
                     <li>Když rodině nezůstane žádné dítě, rodina se automaticky archivuje a dospělí členové v ní se stanou samostatnými dospělými členy</li>
                     <li><strong>Správa dospělých členů</strong>: nový člen (jméno, účet na webu s rolí „rodic“, případně kontaktní e-mail), úpravy, <strong>Ukončil členství</strong> a <strong>Stal se rodičem</strong> (přesun do existující nebo nové rodiny)</li>
                     <li>Samostatný dospělý člen platí příspěvek dospělého člena a má osobní brigádní požadavek; hodiny se mu evidují, doplatek za neodpracované hodiny neplatí</li>
@@ -2847,7 +2890,7 @@ function sb_napoveda_vedouci() {
             <li>Klikněte na <strong>💾 Uložit rodinu</strong>. Karta se sbalí a krátce se zeleně orámuje – uloženo.</li>
         </ol>
         <p><strong>Dítěti je 18 a zůstává ve skautu?</strong> Zaškrtněte místo toho <strong>Dospělý člen</strong> – od příštího roku bude vedeno samostatně v záložce <em>Správa dospělých členů</em>.</p>
-        <p><strong>Rodič je sám členem skauta?</strong> Napište jeho jméno do pole <em>Přidat dospělého člena</em> v rozbalené kartě rodiny a uložte.</p>
+        <p><strong>Rodič je sám členem skauta?</strong> Napište jeho jméno do pole <em>Přidat dospělého člena</em> v rozbalené kartě rodiny a uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
         <p><strong>Omylem jsem označil dítě, že nechodí.</strong> Rozbalte kartu, v části <em>Děti v archivu</em> zaškrtněte <strong>Obnovit</strong> a uložte.</p>
     </div>
@@ -3002,6 +3045,10 @@ function sb_sprava_dospelych() {
                         update_post_meta($r->ID, 'rodina_archiv', ['od_roku' => $rok_x, 'poznamka' => $pozn, 'datum' => $dnes]);
                         $zprava .= sb_alert('Členství ' . $r->post_title . ' končí – od roku ' . $rok_x . ' se mu nebude počítat příspěvek ani brigády.');
                     }
+                } elseif (isset($_POST['sb_dosp_obnovit']) && !empty(sb_rodina_archiv($r->ID)['presun_do'])
+                          && in_array(sb_jmeno_klic($r->post_title), array_map('sb_jmeno_klic', sb_dospeli_pro_rok(intval(sb_rodina_archiv($r->ID)['presun_do']), sb_rok_archivace())), true)) {
+                    $cil_r = get_post(intval(sb_rodina_archiv($r->ID)['presun_do']));
+                    $zprava .= sb_alert($r->post_title . ' přešel/přešla do rodiny ' . ($cil_r ? $cil_r->post_title : '') . ' – obnovením by se počítal(a) dvakrát. Nejdřív ho/ji v rodině označte „už není členem“.', 'error');
                 } elseif (isset($_POST['sb_dosp_obnovit'])) {
                     $konflikt = false;
                     foreach ((array) get_post_meta($r->ID, 'rodice_rodiny', true) as $uid) {
@@ -3042,7 +3089,9 @@ function sb_sprava_dospelych() {
                             $dosp = sb_dospeli_rodiny($cil->ID);
                             $dosp[] = ['jmeno' => $r->post_title, 'od_roku' => $rok_x];
                             update_post_meta($cil->ID, 'dospeli_clenove', $dosp);
-                            update_post_meta($r->ID, 'rodina_archiv', ['od_roku' => $rok_x, 'poznamka' => 'Stal se rodičem – rodina ' . $cil->post_title, 'datum' => $dnes]);
+                            update_post_meta($r->ID, 'rodina_archiv', ['od_roku' => $rok_x, 'poznamka' => 'Stal se rodičem – rodina ' . $cil->post_title, 'datum' => $dnes, 'presun_do' => $cil->ID]);
+                            $kontakt_dosp = (string) get_post_meta($r->ID, 'sb_kontakt_email', true);
+                            if ($kontakt_dosp !== '' && (string) get_post_meta($cil->ID, 'sb_kontakt_email', true) === '') update_post_meta($cil->ID, 'sb_kontakt_email', $kontakt_dosp);
                             $zprava .= sb_alert($r->post_title . ' je od roku ' . $rok_x . ' dospělým členem rodiny ' . $cil->post_title . '. Děti rodiny doplňte v záložce Správa rodin.');
                         }
                     }
@@ -3888,6 +3937,7 @@ function sb_prehled_rodin() {
     if ($je_akce) {
         $post_id     = isset($_POST['edit_rodina_id']) ? intval($_POST['edit_rodina_id']) : 0;
         $post_rodina = $post_id ? sb_get_rodina($post_id) : null;
+        if ($post_rodina && sb_je_dospely($post_rodina->ID)) $post_rodina = null; // dospělí mají vlastní správu
 
         if (!$smi_upravovat) {
             $zprava .= sb_alert('Úpravy rodin jsou teď uzavřené. Otevřou se, když správce zahájí revizi.', 'error');
@@ -3926,7 +3976,12 @@ function sb_prehled_rodin() {
                     $chyba = '';
                     $existujici_nazev = ($nazev !== '' && $nazev !== $post_rodina->post_title) ? sb_post_exists_by_title('rodina', $nazev) : 0;
 
-                    if ($nazev === '') {
+                    $novy_dosp_kontrola = trim(sanitize_text_field(wp_unslash($_POST['novy_dospely'] ?? '')));
+                    $dvojity = $novy_dosp_kontrola !== '' ? sb_najdi_dospeleho_dle_jmena($novy_dosp_kontrola) : null;
+
+                    if ($dvojity) {
+                        $chyba = $dvojity->post_title . ' je už veden(a) jako samostatný dospělý člen. Aby se nepočítal(a) dvakrát, použijte ve Správě dospělých členů „Stal se rodičem“.';
+                    } elseif ($nazev === '') {
                         $chyba = 'Název rodiny nesmí být prázdný.';
                     } elseif ($existujici_nazev && intval($existujici_nazev) !== $id) {
                         $chyba = 'Rodina s tímto názvem už existuje.';
@@ -3937,6 +3992,7 @@ function sb_prehled_rodin() {
                     $aktivni       = [];
                     $novy_archiv   = [];
                     $nove_dospele_deti = [];
+                    $vracene_dospele = [];
                     $odchody       = 0;
                     $od_roku       = sb_rok_archivace();
                     $dnes          = wp_date('Y-m-d');
@@ -4008,7 +4064,8 @@ function sb_prehled_rodin() {
                     $obnovit = (isset($_POST['obnovit']) && is_array($_POST['obnovit'])) ? array_map('intval', $_POST['obnovit']) : [];
                     $zustava_v_archivu = [];
                     foreach ($archiv as $ai => $ad) {
-                        if (in_array($ai, $obnovit, true) && is_array($ad) && empty($ad['dospely'])) {
+                        if (in_array($ai, $obnovit, true) && is_array($ad)) {
+                            if (!empty($ad['dospely'])) $vracene_dospele[] = $ad['jmeno'] ?? '';
                             $aktivni[] = [
                                 'jmeno' => isset($ad['jmeno']) ? $ad['jmeno'] : '',
                                 'oddil' => isset($ad['oddil']) ? $ad['oddil'] : $oddily[0],
@@ -4061,7 +4118,21 @@ function sb_prehled_rodin() {
                         // Dítě, které dospělo, se stává samostatným dospělým členem
                         $vytvoreni = [];
                         foreach ($nove_dospele_deti as $jm) {
-                            if (sb_vytvorit_dospeleho($jm, [], $od_roku)) $vytvoreni[] = $jm;
+                            if (sb_vytvorit_dospeleho($jm, [], $od_roku, $id)) $vytvoreni[] = $jm;
+                        }
+                        // Vrácení omylu: dítě obnovené z „Dospělý člen" – odstraní se záznam, který z něj vznikl
+                        foreach ($vracene_dospele as $jm) {
+                            $omyl = sb_najdi_dospeleho_dle_jmena($jm);
+                            if ($omyl && intval(get_post_meta($omyl->ID, 'sb_z_rodiny', true)) === $id) {
+                                $ma_platby = false;
+                                foreach (get_post_meta($omyl->ID) as $mk => $mv) if (strpos($mk, 'sb_platby_') === 0) $ma_platby = true;
+                                if ($ma_platby) {
+                                    update_post_meta($omyl->ID, 'rodina_archiv', ['od_roku' => $od_roku, 'poznamka' => 'Vráceno do rodiny', 'datum' => $dnes]);
+                                } else {
+                                    wp_delete_post($omyl->ID, true);
+                                }
+                                $zprava .= sb_alert(esc_html($jm) . ' bylo vráceno do rodiny, samostatný záznam dospělého člena byl zrušen.', 'info');
+                            }
                         }
                         $zprava .= sb_alert('Rodina byla upravena.');
                         if ($vytvoreni) {
@@ -4074,8 +4145,35 @@ function sb_prehled_rodin() {
                             $osamostatneni = [];
                             $dosp_zbytek = sb_dospeli_rodiny($id);
                             $dosp_archiv = sb_dospeli_archiv($id);
+                            // Vedoucí rodiče: osamostatní se i s účtem na webu (aby dál viděli Moje brigády)
+                            $vedouci_r = sb_vedouci_rodice($id);
+                            $klice_rucni = array_map(function($d) { return sb_jmeno_klic($d['jmeno']); }, $dosp_zbytek);
+                            $rodice_zbytek = array_map('intval', (array) get_post_meta($id, 'rodice_rodiny', true));
+                            foreach ($vedouci_r as $uid => $jm) {
+                                $k = array_search(sb_jmeno_klic($jm), $klice_rucni, true);
+                                if ($k !== false) unset($dosp_zbytek[$k]); // ručně zadaný = tatáž osoba
+                                if (sb_vytvorit_dospeleho($jm, [$uid], $od_roku)) {
+                                    $osamostatneni[] = $jm;
+                                    $rodice_zbytek = array_values(array_diff($rodice_zbytek, [$uid]));
+                                }
+                            }
+                            update_post_meta($id, 'rodice_rodiny', $rodice_zbytek);
+                            // Ostatní rodiče-členové: účet podle shody jména s rodičem rodiny
+                            $rodice_jmena = [];
+                            foreach ($rodice_zbytek as $uid) {
+                                $u = get_userdata($uid);
+                                if ($u) $rodice_jmena[$uid] = sb_jmeno_klic(trim(($u->last_name ?? '') . ' ' . ($u->first_name ?? '')) ?: $u->display_name);
+                            }
                             foreach ($dosp_zbytek as $d) {
-                                if (sb_vytvorit_dospeleho($d['jmeno'], [], $od_roku)) $osamostatneni[] = $d['jmeno'];
+                                $uid = array_search(sb_jmeno_klic($d['jmeno']), $rodice_jmena, true);
+                                $ucet = $uid !== false ? [intval($uid)] : [];
+                                if (sb_vytvorit_dospeleho($d['jmeno'], $ucet, $od_roku)) {
+                                    $osamostatneni[] = $d['jmeno'];
+                                    if ($ucet) { $rodice_zbytek = array_values(array_diff($rodice_zbytek, $ucet)); unset($rodice_jmena[$uid]); }
+                                }
+                            }
+                            update_post_meta($id, 'rodice_rodiny', $rodice_zbytek);
+                            foreach (sb_dospeli_rodiny($id) as $d) {
                                 $dosp_archiv[] = ['jmeno' => $d['jmeno'], 'od_roku' => intval($d['od_roku'] ?? 0), 'do_roku' => $od_roku, 'datum' => $dnes];
                             }
                             delete_post_meta($id, 'dospeli_clenove');
@@ -4267,8 +4365,14 @@ function sb_prehled_rodin() {
             if (!is_array($d)) continue;
             echo "<span class='sb-chip'>" . esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " <small>(" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ")</small></span>";
         }
+        $klice_rucni = [];
         foreach (sb_dospeli_rodiny($r->ID) as $d) {
+            $klice_rucni[] = sb_jmeno_klic($d['jmeno']);
             echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html($d['jmeno']) . " <small>(dospělý člen)</small></span>";
+        }
+        foreach (sb_vedouci_rodice($r->ID) as $j) {
+            if (in_array(sb_jmeno_klic($j), $klice_rucni, true)) continue;
+            echo "<span class='sb-chip' style='background:#eef3ff; border-color:#b6c6ee;'>" . esc_html($j) . " <small>(vedoucí – člen automaticky)</small></span>";
         }
         foreach ($archiv_deti as $d) {
             if (!is_array($d)) continue;
@@ -4342,7 +4446,7 @@ function sb_prehled_rodin() {
                         $popis = esc_html(isset($d['jmeno']) ? $d['jmeno'] : '') . " (" . esc_html(isset($d['oddil']) ? $d['oddil'] : '') . ") – od roku " . intval(isset($d['od_roku']) ? $d['od_roku'] : 0);
                         if (!empty($d['poznamka'])) $popis .= " – " . esc_html($d['poznamka']);
                         if (!empty($d['dospely'])) {
-                            echo "<div class='sb-rod-check'>$popis <span class='sb-text-hint'>(je samostatným dospělým členem)</span></div>";
+                            echo "<label class='sb-rod-check'><input type='checkbox' name='obnovit[]' value='" . intval($ai) . "'> Vrátit do rodiny (byl to omyl): $popis <span class='sb-text-hint'>(teď samostatný dospělý člen)</span></label>";
                         } else {
                             echo "<label class='sb-rod-check'><input type='checkbox' name='obnovit[]' value='" . intval($ai) . "'> Obnovit: $popis</label>";
                         }
@@ -4353,6 +4457,9 @@ function sb_prehled_rodin() {
                 echo "<div class='sb-rod-sekce'>Dospělí členové v rodině (rodič, který je sám členem skauta)</div>";
                 foreach (sb_dospeli_rodiny($r->ID) as $di => $d) {
                     echo "<label class='sb-rod-check'>" . esc_html($d['jmeno']) . " <span class='sb-text-hint'>(člen od roku " . intval($d['od_roku'] ?? 0) . ")</span> &nbsp; <input type='checkbox' name='dospely_konci[]' value='" . intval($di) . "'> už není členem</label>";
+                }
+                foreach (sb_vedouci_rodice($r->ID) as $j) {
+                    echo "<div class='sb-rod-check'>" . esc_html($j) . " <span class='sb-text-hint'>(vedoucí – člen automaticky, nezadávejte)</span></div>";
                 }
                 echo "<input type='text' name='novy_dospely' maxlength='100' placeholder='Přidat dospělého člena – příjmení a jméno' style='width:100%; max-width:100%;'>";
 
