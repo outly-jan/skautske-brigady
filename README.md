@@ -65,6 +65,15 @@ Správce v záložce *Nastavit požadavky dle roku* u daného roku (např. 2027)
 - **Karta Platby**: přehled rodin se stavem nezaplaceno / splátky / zaplaceno, vyhledávání a filtr stavu, souhrn (příspěvky za děti, doplatky za brigády, dary, celkem k úhradě, uhrazeno, zbývá) a export CSV. Platbu správce zapíše zaškrtnutím **uhrazeno** (celá částka) nebo **částečně uhrazeno** + přijatá částka; u splátek **doplaceno** / **další splátka**. Zapsané platby lze opravit přepsáním nebo smazáním čísla. Stav se počítá ze součtu plateb (≥ celkové částky = zaplaceno). Platby (splátky) jsou v post meta `sb_platby_{rok}`. Vedoucí kartu vidí (připomínají platby rodičům), zapisuje jen správce.
 - **E-maily**: rozesílání vybraným rodinám (všem rodičům s účtem) po 20 na kliknutí, zkušební e-mail sobě, Reply-To `info@skautchlumec.cz`, datum posledního odeslání (`sb_prispevek_mail_{rok}`). Rodinám, jejichž rodiče nemají účet, může správce zadat **kontaktní e-mail** (post meta `sb_kontakt_email`, uloží se natrvalo); použije se jen tehdy, když žádný z rodičů nemá účet.
 
+## Dospělí členové
+
+Kromě rodin s dětmi plugin eviduje i **dospělé členy**:
+
+- **Samostatný dospělý člen** je záznam typu `rodina` s post meta `sb_typ = dospely` (název = příjmení a jméno). Platí příspěvek dospělého člena (nastavení `sb_prispevky[rok]['dosp']`), má osobní brigádní požadavek (`pozadavky_dle_roku[rok]['dosp']`), hodiny se mu evidují, ale doplatek za neodpracované hodiny neplatí. Spravuje se v záložce **Správa dospělých členů** (stejná oprávnění jako rodiny): nový člen, účet na webu (role `rodic`), kontaktní e-mail, *Ukončil členství*, *Stal se rodičem* (přesun do existující / nové rodiny).
+- **Dospělý člen v rodině** (rodič, který je sám členem): post meta `dospeli_clenove` (`jmeno`, `od_roku`), ukončení v `dospeli_archiv` (`do_roku`). Rodina pak platí v jedné částce i jeho příspěvek; hodiny a požadavek zůstávají rodinné.
+- **Dítě dospělo**: ve Správě rodin volba *Dospělý člen* – dítě se archivuje (`dospely: true`) a vznikne samostatný dospělý člen s `sb_od_roku` = rok, od kterého se počítá (žádné dvojí placení).
+- **Rodině nezůstalo dítě** (všechny odešly nebo dospěly): rodina se archivuje a její dospělí členové se osamostatní.
+
 ## Revize rodin a archiv
 
 Členství vedoucí evidují po skautských sezónách (1. 9.–31. 8.), brigádnické požadavky se ale počítají na kalendářní rok. Proto se používá **revize**:

@@ -62,6 +62,7 @@ function wp_insert_post($a) {
 function get_users($a = []) { return array_values($GLOBALS['users']); }
 function get_userdata($id) { return $GLOBALS['users'][$id] ?? false; }
 function get_user_by($f, $v) { return $GLOBALS['users'][$v] ?? false; }
+function is_wp_error($x) { return false; }
 function wp_date($f) { return date($f); }
 function wp_timezone() { return new DateTimeZone('Europe/Prague'); }
 function add_query_arg($a, $u = '') { return '?' . http_build_query($a); }
