@@ -611,5 +611,28 @@ $ulozit($oba, ['rodice' => ['11', '12', '40'], 'rodic_clen_form' => '1', 'rodic_
 $d = sb_dospeli_rodiny(100);
 ok(count($d) === 2 && count(array_filter($d, fn($x) => ($x['uid'] ?? 0) === 40)) === 1 && sb_dospeli_pro_rok(100, $cil) === ['Nováková Jana', 'Bezúčtová Marie'], 'po založení účtu a zaškrtnutí se ruční záznam převede na účet (žádný duplikát)');
 
+echo "== 20. Přezdívky dospělých členů ==\n";
+reset_data(); update_option('sb_revize', ['otevrena' => true, 'rok' => $cil]); $GLOBALS['roles'] = ['administrator'];
+$_POST = ['sb_dosp_novy' => '1', '_wpnonce_dospeli' => 'tok', 'dosp_jmeno' => 'Bambasová Petra', 'dosp_prezdivka' => 'Zmrzlina', 'dosp_ucet' => '0'];
+sb_sprava_dospelych();
+$bp = sb_najdi_dospeleho_dle_jmena('Bambasová Petra');
+ok($bp && get_post_meta($bp->ID, 'sb_prezdivka') === 'Zmrzlina' && sb_nazev_s_prezdivkou($bp) === 'Bambasová Petra (Zmrzlina)', 'nový člen s přezdívkou');
+$_POST = ['sb_dosp_novy' => '1', '_wpnonce_dospeli' => 'tok', 'dosp_jmeno' => 'Hušek Michal (Mixér)', 'dosp_ucet' => '0'];
+sb_sprava_dospelych();
+$hm = sb_najdi_dospeleho_dle_jmena('Hušek Michal');
+ok($hm && $hm->post_title === 'Hušek Michal' && get_post_meta($hm->ID, 'sb_prezdivka') === 'Mixér', 'přezdívka napsaná v závorce za jménem se uloží jako přezdívka');
+$o = $oba; $o[0]['jmeno'] = 'Nováková Klára (Pírko)'; $o[0]['dospely'] = '1';
+$ulozit($o);
+$kl = sb_najdi_dospeleho_dle_jmena('Nováková Klára');
+ok($kl && get_post_meta($kl->ID, 'sb_prezdivka') === 'Pírko', 'dítě převedené na dospělého si přezdívku převezme');
+$_POST = []; $h = sb_sprava_dospelych();
+ok(strpos($h, "Bambasová Petra <span style='font-weight:normal; color:#555;'>(Zmrzlina)</span>") !== false && strpos($h, "data-hledat='bambasová petra zmrzlina'") !== false, 'karta ukazuje přezdívku a hledá se i podle ní');
+$_POST = ['sb_dosp_ulozit' => '1', '_wpnonce_dospeli' => 'tok', 'edit_dospely_id' => (string) $bp->ID, 'dosp_jmeno' => 'Bambasová Petra', 'dosp_prezdivka' => '', 'dosp_ucet' => '0', 'dosp_kontakt' => ''];
+sb_sprava_dospelych();
+ok(get_post_meta($bp->ID, 'sb_prezdivka') === '', 'přezdívku jde smazat');
+update_option('sb_prispevky', [$cil => ['1' => 1200, '2' => 1100, '3' => 1000, 'dosp' => 620, 'ucet' => '2300221146/2010', 'od' => date('Y-m-d', strtotime('-1 day')), 'do' => date('Y-m-d', strtotime('+30 days'))]]);
+$i = sb_prispevek_rodiny($hm, $cil);
+ok(sb_platba_zprava($i) === "Poplatek $cil Hušek Michal", 've zprávě pro příjemce přezdívka není');
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
