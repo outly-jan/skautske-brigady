@@ -667,5 +667,20 @@ $GLOBALS['roles'] = ['administrator'];
 $em = sb_prispevek_email(get_post($y), ['rok' => 2027, 'je_dospely' => true, 'deti' => 0, 'dospeli' => 1, 'dospeli_jmena' => ['Samostatný Karel'], 'za_dospeleho' => 1500, 'zaklad_dospeli' => 1500, 'zaklad' => 1500, 'brigady' => ['v_roce' => false, 'pozadavek' => 0, 'castka' => 0], 'dar' => 0, 'celkem' => 1500, 'stav' => 'nezaplaceno', 'zaplaceno' => 0, 'zbyva' => 1500, 'jmena' => [], 'jmena_qr' => ['Samostatný Karel'], 'rodina' => '', 'ucet' => '2300221146/2010', 'platby' => []]);
 ok(strpos($em['html'], 'Příspěvek 2027 a moje brigády</a>') !== false && strpos($em['html'], '>Moje brigády</a>') === false, 'e-mail odkazuje na sekci „Příspěvek 2027 a moje brigády“');
 
+// --- Seznam všech členů ---
+$GLOBALS['roles'] = ['author'];
+$h = sb_seznam_clenu();
+$cl = sb_vsichni_clenove();
+$typy = array_count_values(array_column($cl, 'typ'));
+ok(strpos($h, 'Členů střediska celkem: ' . count($cl)) !== false && substr_count($h, '<tr data-hledat=') === count($cl), 'vedoucí vidí seznam členů s počtem = počet řádků');
+ok(!empty($typy['dite']) && strpos($h, 'není v rodině') !== false, 'v seznamu jsou děti i dospělí mimo rodinu');
+$jm = array_column($cl, 'jmeno'); $s = $jm; usort($s, 'sb_porovnat_cesky');
+ok($jm === $s, 'seznam je seřazený abecedně');
+ok(sb_porovnat_cesky('Čermák', 'Cyril') > 0 && sb_porovnat_cesky('Chalupa', 'Hrubý') > 0 && sb_porovnat_cesky('Šafář', 'Svoboda') > 0, 'řazení podle české abecedy (Č, Ch, Š)');
+ok(strpos($h, '<th>E-mail</th>') !== false && strpos($h, 'sb_dosp_ulozit') === false && strpos($h, '<form') === false, 'seznam má sloupec E-mail a nejde v něm nic upravovat');
+$GLOBALS['roles'] = ['rodic'];
+ok(strpos(sb_seznam_clenu(), 'Nemáš oprávnění') !== false, 'rodič seznam členů nevidí');
+$GLOBALS['roles'] = ['administrator'];
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);

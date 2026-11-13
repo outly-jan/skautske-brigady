@@ -1308,6 +1308,98 @@ function sb_emaily_prispevku($rodina_id) {
     return $ucty ? array_values($ucty) : sb_kontakt_emaily($rodina_id);
 }
 
+// Účet je vedoucí (role author, správce nebo admin).
+function sb_ucet_je_vedouci($uid) {
+    $u = $uid ? get_userdata(intval($uid)) : null;
+    return $u && array_intersect(['author', 'administrator', 'spravce_brigad'], (array) ($u->roles ?? []));
+}
+
+// Abecední řazení podle české abecedy (Collator, když je k dispozici).
+function sb_porovnat_cesky($a, $b) {
+    static $c = null;
+    if ($c === null) $c = class_exists('Collator') ? new Collator('cs_CZ') : false;
+    if ($c) return $c->compare($a, $b);
+    $klic = function($s) {
+        $s = mb_strtolower($s);
+        // Č, Ř, Š, Ž, Ch řadit za základní písmeno; ostatní diakritiku ignorovat
+        $s = strtr($s, ['ch' => 'h~', 'č' => 'c~', 'ř' => 'r~', 'š' => 's~', 'ž' => 'z~']);
+        return strtr($s, ['á'=>'a','ä'=>'a','ď'=>'d','é'=>'e','ě'=>'e','í'=>'i','ľ'=>'l','ĺ'=>'l','ň'=>'n','ó'=>'o','ö'=>'o','ô'=>'o','ť'=>'t','ú'=>'u','ů'=>'u','ü'=>'u','ý'=>'y']);
+    };
+    return strcmp($klic($a), $klic($b));
+}
+
+// Všichni aktuální členové střediska abecedně:
+// [['jmeno', 'rodina' (název nebo ''), 'typ' => dite|vedouci|dospely, 'emaily' => [...]], ...]
+// E-mail: člen s vlastním účtem → jeho adresa, jinak adresy jednotky (účty rodičů / kontaktní e-mail).
+function sb_vsichni_clenove() {
+    $vysl = [];
+    $mail_uctu = function($uid) {
+        $u = get_userdata(intval($uid));
+        return ($u && is_email($u->user_email)) ? [$u->user_email] : [];
+    };
+    foreach (get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']) as $r) {
+        if (sb_rodina_archiv($r->ID)) continue;
+        $maily_jednotky = sb_emaily_prispevku($r->ID);
+        if (sb_je_dospely($r->ID)) {
+            $ucty = sb_ucty_jednotky($r->ID);
+            $vysl[] = ['jmeno' => sb_nazev_s_prezdivkou($r), 'rodina' => '', 'typ' => ($ucty && sb_ucet_je_vedouci($ucty[0])) ? 'vedouci' : 'dospely', 'emaily' => $maily_jednotky];
+            continue;
+        }
+        $deti = get_post_meta($r->ID, 'deti_rodiny', true);
+        if (is_array($deti)) foreach ($deti as $d) {
+            $j = trim((string) (is_array($d) ? ($d['jmeno'] ?? '') : $d));
+            if ($j !== '') $vysl[] = ['jmeno' => $j, 'rodina' => $r->post_title, 'typ' => 'dite', 'emaily' => $maily_jednotky];
+        }
+        $nicky = sb_prezdivky_uctu($r->ID);
+        $uids = []; $klice = [];
+        foreach (sb_dospeli_rodiny($r->ID) as $d) {
+            $j = sb_dospely_jmeno($d);
+            if ($j === '') continue;
+            $uid = intval($d['uid'] ?? 0);
+            $nick = trim((string) ($uid ? ($nicky[$uid] ?? '') : ($d['prezdivka'] ?? '')));
+            if ($nick !== '' && strpos($j, '(') === false) $j .= ' (' . $nick . ')';
+            if ($uid) $uids[] = $uid; else $klice[] = sb_jmeno_klic($j);
+            $vysl[] = ['jmeno' => $j, 'rodina' => $r->post_title, 'typ' => ($uid && sb_ucet_je_vedouci($uid)) ? 'vedouci' : 'dospely',
+                       'emaily' => ($uid && $mail_uctu($uid)) ? $mail_uctu($uid) : $maily_jednotky];
+        }
+        foreach (sb_vedouci_rodice($r->ID) as $uid => $j) {
+            if (in_array($uid, $uids, true) || in_array(sb_jmeno_klic($j), $klice, true)) continue;
+            $nick = trim((string) ($nicky[$uid] ?? ''));
+            $vysl[] = ['jmeno' => $j . ($nick !== '' ? ' (' . $nick . ')' : ''), 'rodina' => $r->post_title, 'typ' => 'vedouci',
+                       'emaily' => $mail_uctu($uid) ?: $maily_jednotky];
+        }
+    }
+    usort($vysl, function($a, $b) { return sb_porovnat_cesky($a['jmeno'], $b['jmeno']) ?: sb_porovnat_cesky($a['rodina'], $b['rodina']); });
+    return $vysl;
+}
+
+// Záložka „Seznam všech členů" – jen informativní výpis.
+function sb_seznam_clenu() {
+    if (!sb_muze_videt_rodiny()) return '<p>Nemáš oprávnění.</p>';
+    $clenove = sb_vsichni_clenove();
+    $popisy = ['dite' => 'dítě', 'vedouci' => 'vedoucí', 'dospely' => 'nevedoucí dospělý'];
+    $pocty = ['dite' => 0, 'vedouci' => 0, 'dospely' => 0];
+    foreach ($clenove as $c) $pocty[$c['typ']]++;
+    ob_start();
+    echo "<h3 class='sb-section-title'>📋 Seznam všech členů</h3>";
+    echo "<div class='sb-card'><div class='sb-rod-toolbar'><input type='text' id='sb-clen-hledat' placeholder='🔍 Hledat člena, rodinu nebo e-mail…' autocomplete='off'>";
+    echo "<span><strong>Členů střediska celkem: " . count($clenove) . "</strong> <span class='sb-text-hint'>(dětí " . $pocty['dite'] . " · vedoucích " . $pocty['vedouci'] . " · nevedoucích dospělých " . $pocty['dospely'] . ")</span></span></div>";
+    echo "<p class='sb-text-hint' style='margin:8px 0 0;'>Aktuální stav podle Správy rodin a Správy dospělých členů (bez archivu). Jen pro čtení – úpravy se dělají v těchto záložkách. U dětí a členů bez vlastního účtu je e-mail rodiny (účty rodičů, případně kontaktní e-mail).</p></div>";
+    echo "<div style='overflow-x:auto; max-width:100%;'><table class='sb-table' id='sb-clenove-tabulka' style='min-width:560px;'><thead><tr><th class='center'>#</th><th>Jméno</th><th>Rodina</th><th>Typ</th><th>E-mail</th></tr></thead><tbody>";
+    $i = 0;
+    foreach ($clenove as $c) {
+        $i++;
+        $maily = [];
+        foreach ($c['emaily'] as $e) $maily[] = "<a href='mailto:" . esc_attr($e) . "'>" . esc_html($e) . "</a>";
+        echo "<tr data-hledat='" . esc_attr(mb_strtolower($c['jmeno'] . ' ' . $c['rodina'] . ' ' . $popisy[$c['typ']] . ' ' . implode(' ', $c['emaily']))) . "'><td class='center sb-text-hint'>$i</td><td>" . esc_html($c['jmeno']) . "</td><td>"
+            . ($c['rodina'] !== '' ? esc_html($c['rodina']) : "<em class='sb-text-hint'>není v rodině</em>") . "</td><td style='white-space:nowrap;'>" . $popisy[$c['typ']] . "</td><td>"
+            . ($maily ? implode('<br>', $maily) : "<em style='color:#a00;'>chybí</em>") . "</td></tr>";
+    }
+    echo "</tbody></table></div>";
+    echo "<script>(function(){var i=document.getElementById('sb-clen-hledat');if(!i)return;i.addEventListener('input',function(){var q=i.value.toLowerCase().trim();document.querySelectorAll('#sb-clenove-tabulka tbody tr').forEach(function(r){r.style.display=(!q||r.getAttribute('data-hledat').indexOf(q)>-1)?'':'none';});});})();</script>";
+    return ob_get_clean();
+}
+
 // Upozornění na aktivní rodiny / dospělé členy bez e-mailu (nelze jim poslat e-mail s platbou).
 function sb_bez_emailu_html($jednotky, $kotva, $je_spravce, $dospeli = false) {
     $chybi = [];
@@ -1967,6 +2059,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
             <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
             <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů (bez dětí ve skautu)</button>
+            <button onclick="sbShowSection('clenove')">📋 Seznam všech členů</button>
             <button onclick="sbShowSection('upravit_pozadavky')">📅 Nastavit požadavky dle roku</button>
             <button onclick="sbShowSection('upravit_brigady')">🛠️ Vytvoření a správa brigád</button>
             <button onclick="sbShowSection('upravit_ucastniky')">🧮 Správa účastníků</button>
@@ -1979,6 +2072,7 @@ if (array_intersect($roles, $allowed_limited)) {
     <button onclick="sbShowSection('rodiny')">➕ Vytvořit rodinu</button>
     <button onclick="sbShowSection('prehled')">👥 Správa rodin</button>
     <button onclick="sbShowSection('dospeli')">🧑 Správa dospělých členů (bez dětí ve skautu)</button>
+    <button onclick="sbShowSection('clenove')">📋 Seznam všech členů</button>
     <button onclick="sbShowSection('ucastnici_dle')">🧮 Účastníci dle brigád</button>
     <button onclick="sbShowSection('rodiny_dle_brigad')">👪 Rodiny dle brigád</button>
     <button onclick="sbShowSection('rocni_vypis')">📊 Roční výpis</button>
@@ -2056,6 +2150,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Účty na webu zaškrtni <strong>dospělý člen skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li><strong>Účty na webu</strong> v kartě rodiny = kdo se za rodinu přihlašuje do Moje brigády (rodiče, případně nezletilé dítě s vlastním účtem – u něj nezaškrtávej „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtni a účet mu přiřaď v jeho samostatném záznamu ve Správě dospělých členů</li>
+                    <li><strong>Seznam všech členů</strong> (vidí i vedoucí): abecední výpis všech aktuálních členů – děti, vedoucí a nevedoucí dospělí – se sloupci Rodina, Typ a E-mail a celkovým počtem; jen pro čtení. U dětí a členů bez vlastního účtu je e-mail rodiny</li>
                     <li><strong>Bez e-mailu</strong>: nahoře ve Správě rodin i Správě dospělých členů (vidí to i vedoucí) je seznam jednotek, kterým nelze poslat e-mail s platbou – kontaktní e-mail rodině doplníš v záložce Platby, dospělému v jeho kartě</li>
                     <li><strong>Přezdívky</strong>: u samostatného dospělého v jeho kartě, u rodiče-člena v kartě rodiny (pole pod účtem, u člena bez účtu vedle jména; stačí i zápis do závorky za jménem). Zobrazují se u jména, do zprávy pro příjemce platby se nedávají</li>
                     <li>Překlep ve jméně člena bez účtu opravíš přepsáním; vymazáním jména nebo „už není členem“ se člen zadaný v této revizi odebere úplně (bez archivu)</li>
@@ -2131,6 +2226,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-rodiny" class="<?php echo ($aktivni_sekce === 'rodiny') ? 'sb-active' : ''; ?>"><?php echo sb_vytvorit_rodinu(); ?></div>
             <div id="sb-prehled" class="<?php echo ($aktivni_sekce === 'prehled') ? 'sb-active' : ''; ?>"><?php echo sb_prehled_rodin(); ?></div>
             <div id="sb-dospeli" class="<?php echo ($aktivni_sekce === 'dospeli') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_dospelych(); ?></div>
+            <div id="sb-clenove" class="<?php echo ($aktivni_sekce === 'clenove') ? 'sb-active' : ''; ?>"><?php echo sb_seznam_clenu(); ?></div>
             <div id="sb-upravit_pozadavky" class="<?php echo ($aktivni_sekce === 'upravit_pozadavky') ? 'sb-active' : ''; ?>"><?php echo sb_upravit_pozadavky_dle_roku(); ?></div>
             <div id="sb-upravit_brigady" class="<?php echo ($aktivni_sekce === 'upravit_brigady') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_brigad(); ?></div>
             <div id="sb-upravit_ucastniky" class="<?php echo ($aktivni_sekce === 'upravit_ucastniky') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_ucastniku(); ?></div>
@@ -2143,6 +2239,7 @@ if (array_intersect($roles, $allowed_limited)) {
             <div id="sb-rodiny" class="<?php echo ($aktivni_sekce === 'rodiny') ? 'sb-active' : ''; ?>"><?php echo sb_vytvorit_rodinu(); ?></div>
             <div id="sb-prehled" class="<?php echo ($aktivni_sekce === 'prehled') ? 'sb-active' : ''; ?>"><?php echo sb_prehled_rodin(); ?></div>
             <div id="sb-dospeli" class="<?php echo ($aktivni_sekce === 'dospeli') ? 'sb-active' : ''; ?>"><?php echo sb_sprava_dospelych(); ?></div>
+            <div id="sb-clenove" class="<?php echo ($aktivni_sekce === 'clenove') ? 'sb-active' : ''; ?>"><?php echo sb_seznam_clenu(); ?></div>
             <div id="sb-ucastnici_dle" class="<?php echo ($aktivni_sekce === 'ucastnici_dle') ? 'sb-active' : ''; ?>"><?php echo sb_ucastnici_dle_brigad(); ?></div>
             <div id="sb-rodiny_dle_brigad" class="<?php echo ($aktivni_sekce === 'rodiny_dle_brigad') ? 'sb-active' : ''; ?>"><?php echo sb_rodiny_dle_brigad_tab(); ?></div>
             <div id="sb-rocni_vypis" class="<?php echo ($aktivni_sekce === 'rocni_vypis') ? 'sb-active' : ''; ?>"><?php echo sb_rocni_vypis(); ?></div>
@@ -3033,6 +3130,7 @@ function sb_napoveda_vedouci() {
         <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Účty na webu <em>dospělý člen skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Co jsou „Účty na webu“ v kartě rodiny?</strong> Účty, kterými se za rodinu přihlašuje do Moje brigády – rodiče, případně dítě s vlastním účtem (u dítěte nezaškrtávejte „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtněte a účet mu přiřaďte ve Správě dospělých členů.</p>
+        <p><strong>Seznam všech členů</strong>: abecední výpis všech členů střediska (děti, vedoucí i ostatní dospělí) s rodinou, typem a e-mailem – jen pro čtení, nahoře je celkový počet.</p>
         <p><strong>Bez e-mailu</strong>: nahoře ve Správě rodin a ve Správě dospělých členů je seznam těch, kterým nelze poslat e-mail s platbou (nemají účet ani kontaktní e-mail). Pokud jejich e-mail znáte, pošlete ho prosím Spajdymu.</p>
         <p><strong>Přezdívky</strong> dospělých členů zapíšete v jejich kartě (samostatní dospělí) nebo v kartě rodiny pod účtem rodiče, případně do závorky za jménem.</p>
         <p><strong>Jak poznám dítě v archivu?</strong> Na kartě je jeho jméno <span style="background:#eee;border:1px solid #ccc;border-radius:12px;padding:0 8px;color:#777;text-decoration:line-through;">šedé a přeškrtnuté</span>.</p>
