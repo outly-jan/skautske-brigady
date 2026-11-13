@@ -76,6 +76,7 @@ Kromě rodin s dětmi plugin eviduje i **dospělé členy**:
 - **Rodině nezůstalo dítě** (všechny odešly nebo dospěly): rodina se archivuje a její dospělí členové se osamostatní (i s účty na webu).
 - **Rodina, která děti nemá** (např. dva vedoucí): tlačítko *Převést na dospělé členy* v kartě rodiny udělá totéž.
 - **Účty na webu v kartě rodiny** (`rodice_rodiny`) = kdo se za rodinu přihlašuje (rodiče, případně nezletilé dítě s vlastním účtem – bez zaškrtnutí „dospělý člen“). Dospělé dítě s vlastním účtem patří ke svému samostatnému záznamu.
+- **Testovací rodiny** (meta `sb_testovaci`, přepíná správce v kartě rodiny): fungují normálně (Moje brigády, zkušební e-mail v Platbách), ale nejsou ve Správě rodin (mají vlastní sekci), Seznamu členů, Platbách vč. CSV a rozesílání, Ročním výpisu vč. CSV ani v upozornění Bez e-mailu.
 - **Seznam všech členů** (správci i vedoucí): abecední přehled všech aktuálních členů (děti, vedoucí, nevedoucí dospělí) se sloupci Rodina, Typ, E-mail a celkovým počtem; jen pro čtení, řazení podle české abecedy.
 - **Bez e-mailu**: nahoře ve Správě rodin a Správě dospělých členů (i pro vedoucí) je seznam aktivních jednotek bez účtu i kontaktního e-mailu, s odkazy na jejich karty.
 - **Ochrany**: stejný člen se do rodiny nepřidá dvakrát (ani po obnovení stránky); člen zadaný v téže revizi se při odebrání smaže bez archivu; obnovení člena, který „se stal rodičem“, je zablokované, dokud je členem rodiny.

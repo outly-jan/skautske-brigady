@@ -30,7 +30,7 @@ function sb_export_rocni_vypis_csv() {
     }
 
     $rok       = isset($_GET['rok']) ? intval($_GET['rok']) : intval(date('Y'));
-    $rodiny    = get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']);
+    $rodiny    = sb_bez_testovacich(get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']));
     $brigady   = get_posts(['post_type' => 'brigada', 'numberposts' => -1]);
     $pozadavky = get_option('pozadavky_dle_roku', []);
     $poz_rok   = $pozadavky[$rok] ?? null;
@@ -918,6 +918,14 @@ function sb_deti_jmena_pro_rok($rodina_id, $rok) {
     return $jmena;
 }
 
+// Testovací rodina/člen: funguje normálně (Moje brigády, zkušební e-mail), ale nezapočítává se do přehledů a statistik.
+function sb_je_testovaci($rodina_id) {
+    return (bool) get_post_meta($rodina_id, 'sb_testovaci', true);
+}
+function sb_bez_testovacich($rodiny) {
+    return array_values(array_filter((array) $rodiny, function($r) { return !sb_je_testovaci($r->ID); }));
+}
+
 // Dospělý člen: samostatná jednotka bez dětí – příspěvek i brigádní požadavek se vztahují na něj osobně.
 function sb_je_dospely($rodina_id) {
     return get_post_meta($rodina_id, 'sb_typ', true) === 'dospely';
@@ -1338,7 +1346,7 @@ function sb_vsichni_clenove() {
         return ($u && is_email($u->user_email)) ? [$u->user_email] : [];
     };
     foreach (get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']) as $r) {
-        if (sb_rodina_archiv($r->ID)) continue;
+        if (sb_rodina_archiv($r->ID) || sb_je_testovaci($r->ID)) continue;
         $maily_jednotky = sb_emaily_prispevku($r->ID);
         if (sb_je_dospely($r->ID)) {
             $ucty = sb_ucty_jednotky($r->ID);
@@ -1421,9 +1429,10 @@ function sb_bez_emailu_html($jednotky, $kotva, $je_spravce, $dospeli = false) {
 }
 
 // Platící rodiny pro rok: [['rodina' => WP_Post, 'info' => [...]], ...] (abecedně)
-function sb_platici_rodiny($rok) {
+function sb_platici_rodiny($rok, $vcetne_testovacich = false) {
     $vysl = [];
     foreach (get_posts(['post_type' => 'rodina', 'numberposts' => -1, 'orderby' => 'title', 'order' => 'ASC']) as $r) {
+        if (!$vcetne_testovacich && sb_je_testovaci($r->ID)) continue;
         $info = sb_prispevek_rodiny($r, $rok);
         if ($info) $vysl[] = ['rodina' => $r, 'info' => $info];
     }
@@ -1731,7 +1740,7 @@ function sb_platby_tab() {
         }
         echo "<div class='sb-form-row' style='margin-bottom:12px;'>";
         echo "<select name='sb_mail_test_rodina' style='max-width:260px;'>";
-        foreach ($seznam as $z) echo "<option value='" . intval($z['rodina']->ID) . "'>" . esc_html($z['rodina']->post_title) . "</option>";
+        foreach (sb_platici_rodiny($rok, true) as $z) echo "<option value='" . intval($z['rodina']->ID) . "'>" . esc_html($z['rodina']->post_title) . (sb_je_testovaci($z['rodina']->ID) ? ' 🧪' : '') . "</option>";
         echo "</select>";
         echo "<input type='submit' name='sb_mail_test' value='Poslat zkušební e-mail mně' class='sb-btn sb-btn-secondary'>";
         echo "</div>";
@@ -1858,7 +1867,7 @@ if (array_intersect($roles, $allowed_limited)) {
             $aktivni_sekce = 'rodiny';
         }
         // Správa rodin
-        if (isset($_POST['edit_rodina_id']) || isset($_POST['confirm_delete_rodina']) || isset($_POST['smazat_dite']) ||
+        if (isset($_POST['edit_rodina_id']) || isset($_POST['sb_testovaci_prepnout']) || isset($_POST['confirm_delete_rodina']) || isset($_POST['smazat_dite']) ||
             (isset($_POST['vybrana_rodina']) && isset($_POST['akce']) && sanitize_key($_POST['akce']) === 'vyber')) {
             $aktivni_sekce = 'prehled';
         }
@@ -2150,6 +2159,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Účty na webu zaškrtni <strong>dospělý člen skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li><strong>Účty na webu</strong> v kartě rodiny = kdo se za rodinu přihlašuje do Moje brigády (rodiče, případně nezletilé dítě s vlastním účtem – u něj nezaškrtávej „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtni a účet mu přiřaď v jeho samostatném záznamu ve Správě dospělých členů</li>
+                    <li><strong>Testovací rodiny</strong>: v kartě rodiny tlačítko <em>🧪 Označit jako testovací</em> (jen správce, kdykoli). Taková rodina funguje dál (přihlášení, Moje brigády, zkušební e-mail), ale nezapočítává se do Správy rodin, Seznamu členů, Plateb, Ročního výpisu ani upozornění Bez e-mailu – najdeš ji dole v sekci 🧪 Testovací rodiny</li>
                     <li><strong>Seznam všech členů</strong> (vidí i vedoucí): abecední výpis všech aktuálních členů – děti, vedoucí a nevedoucí dospělí – se sloupci Rodina, Typ a E-mail (jen u dospělých) a celkovým počtem; jen pro čtení</li>
                     <li><strong>Bez e-mailu</strong>: nahoře ve Správě rodin i Správě dospělých členů (vidí to i vedoucí) je seznam jednotek, kterým nelze poslat e-mail s platbou – kontaktní e-mail rodině doplníš v záložce Platby, dospělému v jeho kartě</li>
                     <li><strong>Přezdívky</strong>: u samostatného dospělého v jeho kartě, u rodiče-člena v kartě rodiny (pole pod účtem, u člena bez účtu vedle jména; stačí i zápis do závorky za jménem). Zobrazují se u jména, do zprávy pro příjemce platby se nedávají</li>
@@ -3130,6 +3140,7 @@ function sb_napoveda_vedouci() {
         <p><strong>Rodič je sám členem skauta?</strong> V rozbalené kartě rodiny zaškrtněte u jeho účtu v seznamu Účty na webu <em>dospělý člen skauta</em>; nemá-li účet, napište jeho jméno do pole <em>Přidat dospělého člena</em>. Uložte. Rodiče, kteří jsou vedoucí, se započítají automaticky – ty nezadávejte.</p>
         <p><strong>Rodina bez dětí</strong> (např. dva dospělí členové)? V rozbalené kartě použijte tlačítko <strong>Převést na dospělé členy</strong> – každý pak bude veden samostatně.</p>
         <p><strong>Co jsou „Účty na webu“ v kartě rodiny?</strong> Účty, kterými se za rodinu přihlašuje do Moje brigády – rodiče, případně dítě s vlastním účtem (u dítěte nezaškrtávejte „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtněte a účet mu přiřaďte ve Správě dospělých členů.</p>
+        <p><strong>🧪 Testovací rodiny</strong> (dole ve Správě rodin) slouží jen ke zkoušení webu – nezapočítávají se do přehledů ani statistik.</p>
         <p><strong>Seznam všech členů</strong>: abecední výpis všech členů střediska (děti, vedoucí i ostatní dospělí) s rodinou, typem a e-mailem – jen pro čtení, nahoře je celkový počet.</p>
         <p><strong>Bez e-mailu</strong>: nahoře ve Správě rodin a ve Správě dospělých členů je seznam těch, kterým nelze poslat e-mail s platbou (nemají účet ani kontaktní e-mail). Pokud jejich e-mail znáte, pošlete ho prosím Spajdymu.</p>
         <p><strong>Přezdívky</strong> dospělých členů zapíšete v jejich kartě (samostatní dospělí) nebo v kartě rodiny pod účtem rodiče, případně do závorky za jménem.</p>
@@ -3400,9 +3411,9 @@ function sb_sprava_dospelych() {
         echo "</form></details></div>";
     }
 
-    echo sb_bez_emailu_html($aktivni, 'sb-dospely-', sb_je_spravce(), true);
+    echo sb_bez_emailu_html(sb_bez_testovacich($aktivni), 'sb-dospely-', sb_je_spravce(), true);
 
-    echo "<div class='sb-card'><div class='sb-rod-toolbar'><input type='text' id='sb-dosp-hledat' placeholder='🔍 Hledat člena…' autocomplete='off'><span class='sb-text-hint'>Dospělých členů: " . count($aktivni) . "</span></div></div>";
+    echo "<div class='sb-card'><div class='sb-rod-toolbar'><input type='text' id='sb-dosp-hledat' placeholder='🔍 Hledat člena…' autocomplete='off'><span class='sb-text-hint'>Dospělých členů: " . count(sb_bez_testovacich($aktivni)) . "</span></div></div>";
 
     $karta = function($r, $archivni) use ($smi, $vyber_uctu, $rodiny_cil, $ulozena_id) {
         $ucty = array_map('intval', sb_ucty_jednotky($r->ID));
@@ -3865,12 +3876,12 @@ function sb_rocni_vypis() {
         return '<p>Nemáš oprávnění pro roční výpis.</p>';
     }
 
-    $rodiny = get_posts([
+    $rodiny = sb_bez_testovacich(get_posts([
         'post_type' => 'rodina',
         'numberposts' => -1,
         'orderby' => 'title',
         'order' => 'ASC'
-    ]);
+    ]));
     $brigady = get_posts(['post_type' => 'brigada', 'numberposts' => -1]);
     $pozadavky = get_option('pozadavky_dle_roku', []);
     $vybrany_rok = isset($_POST['vybrany_rok']) ? intval($_POST['vybrany_rok']) : intval(date('Y'));
@@ -4188,6 +4199,18 @@ function sb_prehled_rodin() {
     $zprava      = '';
     $otevrena_id = 0; // karta, která zůstane rozbalená (chyba při uložení)
     $ulozena_id  = 0; // karta, která se po úspěšném uložení zvýrazní (sbalená)
+
+    // Označení testovací rodiny (jen správce, kdykoli – nezávisle na revizi)
+    if (isset($_POST['sb_testovaci_prepnout'], $_POST['sb_testovaci_id'])) {
+        $tr = sb_get_rodina(intval($_POST['sb_testovaci_id']));
+        if (!$je_spravce || !isset($_POST['_wpnonce_testovaci']) || !wp_verify_nonce($_POST['_wpnonce_testovaci'], 'sb_testovaci') || !$tr) {
+            $zprava .= sb_alert('Neplatný požadavek.', 'error');
+        } else {
+            if ($_POST['sb_testovaci_prepnout'] === '1') update_post_meta($tr->ID, 'sb_testovaci', 1); else delete_post_meta($tr->ID, 'sb_testovaci');
+            $zprava .= sb_alert('Rodina ' . $tr->post_title . ($_POST['sb_testovaci_prepnout'] === '1' ? ' je označená jako testovací – v přehledech a statistikách se nezobrazuje.' : ' je zase běžná rodina.'));
+            $ulozena_id = $tr->ID;
+        }
+    }
 
     // ---------------------------------------------------------------
     // Zpracování akcí
@@ -4583,9 +4606,11 @@ function sb_prehled_rodin() {
 
     $aktivni_rodiny   = [];
     $archivovane      = [];
+    $testovaci        = [];
     $deti_celkem      = 0;
     foreach ($rodiny as $r) {
         if (sb_je_dospely($r->ID)) continue; // dospělí členové mají vlastní záložku
+        if (sb_je_testovaci($r->ID)) { $testovaci[] = $r; continue; }
         if (sb_rodina_archiv($r->ID)) { $archivovane[] = $r; continue; }
         $aktivni_rodiny[] = $r;
         $d = get_post_meta($r->ID, 'deti_rodiny', true);
@@ -4695,6 +4720,14 @@ function sb_prehled_rodin() {
         }
         echo "</div>";
 
+        if ($je_spravce) {
+            $test = sb_je_testovaci($r->ID);
+            echo "<form method='post' class='sb-rod-inline' style='margin:0 0 6px;'>";
+            wp_nonce_field('sb_testovaci', '_wpnonce_testovaci');
+            echo "<input type='hidden' name='sb_testovaci_id' value='" . intval($r->ID) . "'>";
+            echo "<button type='submit' name='sb_testovaci_prepnout' value='" . ($test ? '0' : '1') . "' class='sb-btn sb-btn-secondary sb-btn-sm' style='font-size:11px; padding:2px 8px;'>"
+                . ($test ? '🧪 Testovací – vrátit mezi běžné rodiny' : '🧪 Označit jako testovací') . "</button></form>";
+        }
         if ($archivni && $info_archiv) {
             echo "<div class='sb-text-hint'>V archivu od roku " . intval($info_archiv['od_roku']) . (!empty($info_archiv['poznamka']) ? " – " . esc_html($info_archiv['poznamka']) : "") . "</div>";
         }
@@ -4844,6 +4877,13 @@ function sb_prehled_rodin() {
     echo "</div>";
     if (empty($aktivni_rodiny)) {
         echo "<p class='sb-text-muted'>Zatím nejsou žádné rodiny.</p>";
+    }
+
+    if (!empty($testovaci)) {
+        echo "<details class='sb-archiv' style='margin-top:20px;'" . (in_array($ulozena_id ?: $otevrena_id, array_map(function($r) { return $r->ID; }, $testovaci), true) ? " open" : "") . "><summary>🧪 Testovací rodiny (" . count($testovaci) . ") – nezapočítávají se do přehledů a statistik</summary>";
+        echo "<div class='sb-rod-grid'>";
+        foreach ($testovaci as $r) $vykresli_kartu($r, (bool) sb_rodina_archiv($r->ID));
+        echo "</div></details>";
     }
 
     if (!empty($archivovane)) {

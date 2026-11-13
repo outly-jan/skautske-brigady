@@ -684,5 +684,26 @@ $GLOBALS['roles'] = ['rodic'];
 ok(strpos(sb_seznam_clenu(), 'Nemáš oprávnění') !== false, 'rodič seznam členů nevidí');
 $GLOBALS['roles'] = ['administrator'];
 
+// --- Testovací rodiny ---
+$GLOBALS['roles'] = ['administrator'];
+$tid = wp_insert_post(['post_type' => 'rodina', 'post_title' => 'Testerovi', 'post_status' => 'publish']);
+update_post_meta($tid, 'deti_rodiny', [['jmeno' => 'Tester Pepík', 'oddil' => 'Braši']]);
+ok(in_array('Tester Pepík', array_column(sb_vsichni_clenove(), 'jmeno'), true), 'před označením je testovací dítě v seznamu členů');
+$_POST = ['sb_testovaci_prepnout' => '1', 'sb_testovaci_id' => $tid, '_wpnonce_testovaci' => 'tok'];
+$h = sb_prehled_rodin(); $_POST = [];
+ok(sb_je_testovaci($tid) && strpos($h, '🧪 Testovací rodiny (1)') !== false, 'správce označí rodinu jako testovací, zobrazí se v sekci Testovací rodiny');
+ok(!in_array('Tester Pepík', array_column(sb_vsichni_clenove(), 'jmeno'), true), 'testovací rodina není v seznamu členů');
+ok(!in_array($tid, array_map(function($z) { return $z['rodina']->ID; }, sb_platici_rodiny(2027)), true), 'testovací rodina není v Platbách');
+ok(strpos(sb_prehled_rodin(), "#sb-rodina-$tid'") === false, 'testovací rodina není v upozornění Bez e-mailu');
+$GLOBALS['roles'] = ['author'];
+$_POST = ['sb_testovaci_prepnout' => '0', 'sb_testovaci_id' => $tid, '_wpnonce_testovaci' => 'tok'];
+sb_prehled_rodin(); $_POST = [];
+ok(sb_je_testovaci($tid), 'vedoucí označení testovací rodiny nezmění');
+$GLOBALS['roles'] = ['administrator'];
+$_POST = ['sb_testovaci_prepnout' => '0', 'sb_testovaci_id' => $tid, '_wpnonce_testovaci' => 'tok'];
+sb_prehled_rodin(); $_POST = [];
+ok(!sb_je_testovaci($tid), 'správce označení zruší');
+update_post_meta($tid, 'sb_testovaci', 1);
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
