@@ -710,5 +710,19 @@ sb_prehled_rodin(); $_POST = [];
 ok(!sb_je_testovaci($tid), 'správce označení zruší');
 update_post_meta($tid, 'sb_testovaci', 1);
 
+// --- Testovací dospělý člen ---
+$GLOBALS['roles'] = ['administrator'];
+$td = sb_vytvorit_dospeleho('Testovací Jan', [], 2026);
+ok(in_array('Testovací Jan', array_column(sb_vsichni_clenove(), 'jmeno'), true), 'dospělý je před označením v seznamu členů');
+$_POST = ['sb_dosp_testovaci' => '1', 'dosp_id' => $td, '_wpnonce_dosp_test' => 'tok'];
+$h = sb_sprava_dospelych(); $_POST = [];
+ok(sb_je_testovaci($td) && strpos($h, '🧪 Testovací členové (1)') !== false, 'správce označí dospělého jako testovacího');
+ok(!in_array('Testovací Jan', array_column(sb_vsichni_clenove(), 'jmeno'), true) && !in_array($td, array_map(function($z) { return $z['rodina']->ID; }, sb_platici_rodiny(2027)), true), 'testovací dospělý není v seznamu členů ani v Platbách');
+$GLOBALS['roles'] = ['author'];
+$_POST = ['sb_dosp_testovaci' => '0', 'dosp_id' => $td, '_wpnonce_dosp_test' => 'tok'];
+sb_sprava_dospelych(); $_POST = [];
+ok(sb_je_testovaci($td), 'vedoucí označení testovacího dospělého nezmění');
+$GLOBALS['roles'] = ['administrator'];
+
 echo "\n" . ($fail === 0 ? "VŠE V POŘÁDKU ($pass kontrol)" : "SELHALO: $fail (prošlo $pass)") . "\n";
 exit($fail === 0 ? 0 : 1);
