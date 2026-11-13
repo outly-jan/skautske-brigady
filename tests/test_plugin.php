@@ -678,6 +678,8 @@ $jm = array_column($cl, 'jmeno'); $s = $jm; usort($s, 'sb_porovnat_cesky');
 ok($jm === $s, 'seznam je seřazený abecedně');
 ok(sb_porovnat_cesky('Čermák', 'Cyril') > 0 && sb_porovnat_cesky('Chalupa', 'Hrubý') > 0 && sb_porovnat_cesky('Šafář', 'Svoboda') > 0, 'řazení podle české abecedy (Č, Ch, Š)');
 ok(strpos($h, '<th>E-mail</th>') !== false && strpos($h, 'sb_dosp_ulozit') === false && strpos($h, '<form') === false, 'seznam má sloupec E-mail a nejde v něm nic upravovat');
+$deti_cl = array_filter($cl, function($c) { return $c['typ'] === 'dite'; });
+ok($deti_cl && !array_filter(array_column($deti_cl, 'emaily')) && strpos($h, '>---</span>') !== false, 'u dětí se e-mail neuvádí (---)');
 $GLOBALS['roles'] = ['rodic'];
 ok(strpos(sb_seznam_clenu(), 'Nemáš oprávnění') !== false, 'rodič seznam členů nevidí');
 $GLOBALS['roles'] = ['administrator'];

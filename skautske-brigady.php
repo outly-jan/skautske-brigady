@@ -1330,7 +1330,7 @@ function sb_porovnat_cesky($a, $b) {
 
 // Všichni aktuální členové střediska abecedně:
 // [['jmeno', 'rodina' (název nebo ''), 'typ' => dite|vedouci|dospely, 'emaily' => [...]], ...]
-// E-mail: člen s vlastním účtem → jeho adresa, jinak adresy jednotky (účty rodičů / kontaktní e-mail).
+// E-mail jen u dospělých: vlastní účet → jeho adresa, jinak adresy jednotky (kontaktní e-mail / účty rodiny).
 function sb_vsichni_clenove() {
     $vysl = [];
     $mail_uctu = function($uid) {
@@ -1348,7 +1348,7 @@ function sb_vsichni_clenove() {
         $deti = get_post_meta($r->ID, 'deti_rodiny', true);
         if (is_array($deti)) foreach ($deti as $d) {
             $j = trim((string) (is_array($d) ? ($d['jmeno'] ?? '') : $d));
-            if ($j !== '') $vysl[] = ['jmeno' => $j, 'rodina' => $r->post_title, 'typ' => 'dite', 'emaily' => $maily_jednotky];
+            if ($j !== '') $vysl[] = ['jmeno' => $j, 'rodina' => $r->post_title, 'typ' => 'dite', 'emaily' => []];
         }
         $nicky = sb_prezdivky_uctu($r->ID);
         $uids = []; $klice = [];
@@ -1384,7 +1384,7 @@ function sb_seznam_clenu() {
     echo "<h3 class='sb-section-title'>📋 Seznam všech členů</h3>";
     echo "<div class='sb-card'><div class='sb-rod-toolbar'><input type='text' id='sb-clen-hledat' placeholder='🔍 Hledat člena, rodinu nebo e-mail…' autocomplete='off'>";
     echo "<span><strong>Členů střediska celkem: " . count($clenove) . "</strong> <span class='sb-text-hint'>(dětí " . $pocty['dite'] . " · vedoucích " . $pocty['vedouci'] . " · nevedoucích dospělých " . $pocty['dospely'] . ")</span></span></div>";
-    echo "<p class='sb-text-hint' style='margin:8px 0 0;'>Aktuální stav podle Správy rodin a Správy dospělých členů (bez archivu). Jen pro čtení – úpravy se dělají v těchto záložkách. U dětí a členů bez vlastního účtu je e-mail rodiny (účty rodičů, případně kontaktní e-mail).</p></div>";
+    echo "<p class='sb-text-hint' style='margin:8px 0 0;'>Aktuální stav podle Správy rodin a Správy dospělých členů (bez archivu). Jen pro čtení – úpravy se dělají v těchto záložkách. E-mail se uvádí jen u dospělých (u člena bez vlastního účtu kontaktní e-mail).</p></div>";
     echo "<div style='overflow-x:auto; max-width:100%;'><table class='sb-table' id='sb-clenove-tabulka' style='min-width:560px;'><thead><tr><th class='center'>#</th><th>Jméno</th><th>Rodina</th><th>Typ</th><th>E-mail</th></tr></thead><tbody>";
     $i = 0;
     foreach ($clenove as $c) {
@@ -1393,7 +1393,7 @@ function sb_seznam_clenu() {
         foreach ($c['emaily'] as $e) $maily[] = "<a href='mailto:" . esc_attr($e) . "'>" . esc_html($e) . "</a>";
         echo "<tr data-hledat='" . esc_attr(mb_strtolower($c['jmeno'] . ' ' . $c['rodina'] . ' ' . $popisy[$c['typ']] . ' ' . implode(' ', $c['emaily']))) . "'><td class='center sb-text-hint'>$i</td><td>" . esc_html($c['jmeno']) . "</td><td>"
             . ($c['rodina'] !== '' ? esc_html($c['rodina']) : "<em class='sb-text-hint'>není v rodině</em>") . "</td><td style='white-space:nowrap;'>" . $popisy[$c['typ']] . "</td><td>"
-            . ($maily ? implode('<br>', $maily) : "<em style='color:#a00;'>chybí</em>") . "</td></tr>";
+            . ($c['typ'] === 'dite' ? "<span class='sb-text-hint'>---</span>" : ($maily ? implode('<br>', $maily) : "<em style='color:#a00;'>chybí</em>")) . "</td></tr>";
     }
     echo "</tbody></table></div>";
     echo "<script>(function(){var i=document.getElementById('sb-clen-hledat');if(!i)return;i.addEventListener('input',function(){var q=i.value.toLowerCase().trim();document.querySelectorAll('#sb-clenove-tabulka tbody tr').forEach(function(r){r.style.display=(!q||r.getAttribute('data-hledat').indexOf(q)>-1)?'':'none';});});})();</script>";
@@ -2150,7 +2150,7 @@ if (array_intersect($roles, $allowed_limited)) {
                     <li><strong>Rodič je sám členem</strong> – ve Správě rodin u jeho účtu v seznamu Účty na webu zaškrtni <strong>dospělý člen skauta</strong> (rodiče bez účtu napiš do pole „Dospělí členové v rodině bez účtu“): rodina pak platí v jedné částce i jeho příspěvek dospělého člena (hodiny se počítají za rodinu). <strong>Rodič s rolí vedoucí (author) nebo správce/administrátor je dospělým členem automaticky</strong> – nezadávej ho</li>
                     <li><strong>Rodina bez dětí</strong> (např. dva vedoucí) – v rozbalené kartě tlačítko <strong>Převést na dospělé členy</strong>: rodina se archivuje a každý bude veden jako samostatný dospělý člen i se svým účtem</li>
                     <li><strong>Účty na webu</strong> v kartě rodiny = kdo se za rodinu přihlašuje do Moje brigády (rodiče, případně nezletilé dítě s vlastním účtem – u něj nezaškrtávej „dospělý člen skauta“). Dospělé dítě s vlastním účtem z rodiny odškrtni a účet mu přiřaď v jeho samostatném záznamu ve Správě dospělých členů</li>
-                    <li><strong>Seznam všech členů</strong> (vidí i vedoucí): abecední výpis všech aktuálních členů – děti, vedoucí a nevedoucí dospělí – se sloupci Rodina, Typ a E-mail a celkovým počtem; jen pro čtení. U dětí a členů bez vlastního účtu je e-mail rodiny</li>
+                    <li><strong>Seznam všech členů</strong> (vidí i vedoucí): abecední výpis všech aktuálních členů – děti, vedoucí a nevedoucí dospělí – se sloupci Rodina, Typ a E-mail (jen u dospělých) a celkovým počtem; jen pro čtení</li>
                     <li><strong>Bez e-mailu</strong>: nahoře ve Správě rodin i Správě dospělých členů (vidí to i vedoucí) je seznam jednotek, kterým nelze poslat e-mail s platbou – kontaktní e-mail rodině doplníš v záložce Platby, dospělému v jeho kartě</li>
                     <li><strong>Přezdívky</strong>: u samostatného dospělého v jeho kartě, u rodiče-člena v kartě rodiny (pole pod účtem, u člena bez účtu vedle jména; stačí i zápis do závorky za jménem). Zobrazují se u jména, do zprávy pro příjemce platby se nedávají</li>
                     <li>Překlep ve jméně člena bez účtu opravíš přepsáním; vymazáním jména nebo „už není členem“ se člen zadaný v této revizi odebere úplně (bez archivu)</li>
