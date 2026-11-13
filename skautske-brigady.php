@@ -1336,7 +1336,7 @@ function sb_porovnat_cesky($a, $b) {
     return strcmp($klic($a), $klic($b));
 }
 
-// Všichni aktuální členové střediska abecedně:
+// Všichni aktuální členové střediska (seřazení podle rodiny, pak jména):
 // [['jmeno', 'rodina' (název nebo ''), 'typ' => dite|vedouci|dospely, 'emaily' => [...]], ...]
 // E-mail jen u dospělých: vlastní účet → jeho adresa, jinak adresy jednotky (kontaktní e-mail / účty rodiny).
 function sb_vsichni_clenove() {
@@ -1377,7 +1377,15 @@ function sb_vsichni_clenove() {
                        'emaily' => $mail_uctu($uid) ?: $maily_jednotky];
         }
     }
-    usort($vysl, function($a, $b) { return sb_porovnat_cesky($a['jmeno'], $b['jmeno']) ?: sb_porovnat_cesky($a['rodina'], $b['rodina']); });
+    // Řazení podle rodiny, v ní podle jména; samostatný dospělý se řadí podle příjmení, jako by to byla jeho rodina.
+    $klic_rodiny = function($c) {
+        if ($c['rodina'] !== '') return $c['rodina'];
+        $slova = preg_split('/\s+/u', trim($c['jmeno']), 2);
+        return $slova[0] ?? '';
+    };
+    usort($vysl, function($a, $b) use ($klic_rodiny) {
+        return sb_porovnat_cesky($klic_rodiny($a), $klic_rodiny($b)) ?: sb_porovnat_cesky($a['rodina'], $b['rodina']) ?: sb_porovnat_cesky($a['jmeno'], $b['jmeno']);
+    });
     return $vysl;
 }
 
