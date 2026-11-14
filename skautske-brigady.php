@@ -4067,6 +4067,24 @@ function sb_rocni_vypis() {
             $predpokladane_inkaso += max(0, $z['pozadavek'] - $proj) * $sazba;
         }
 
+        // Doplatky rodin, které v roce X+1 příspěvek neplatí (doplatek se vybírá jen s příspěvkem X+1)
+        $nevybira_html = '';
+        $rok_prispevku = intval($vybrany_rok) + 1;
+        if (sb_prispevek_nastaveni($rok_prispevku)) {
+            $nevybira = 0; $nevybira_jmena = [];
+            foreach ($radky as $z) {
+                if ($z['poplatek'] <= 0) continue;
+                $rp = get_post($z['rodina_id']);
+                if ($rp && !sb_prispevek_rodiny($rp, $rok_prispevku)) {
+                    $nevybira += $z['poplatek'];
+                    $nevybira_jmena[] = $z['nazev'] . ' (' . number_format($z['poplatek'], 0, ',', ' ') . ' Kč)';
+                }
+            }
+            $nevybira_html = "<div>Z toho se v příspěvku $rok_prispevku vybere: <strong>" . number_format($celkem_poplatek - $nevybira, 2, ',', ' ') . " Kč</strong></div>"
+                . "<div>Nevybírá se: <strong>" . number_format($nevybira, 2, ',', ' ') . " Kč</strong>"
+                . ($nevybira_jmena ? " <span style='font-size:12px; color:#555;'>– rodiny, které v roce $rok_prispevku příspěvek neplatí: " . implode(', ', $nevybira_jmena) . "</span>" : "") . "</div>";
+        }
+
         // --- Výpis ---
         echo "<div class='sb-card'>";
         echo "<h4 class='sb-card-title'>Rok " . intval($vybrany_rok) . " — sazba: <strong>" . number_format($sazba, 2, ',', ' ') . " Kč/h</strong></h4>";
@@ -4080,6 +4098,7 @@ function sb_rocni_vypis() {
         echo "<div style='$stat_style background:#fff3cd; border:1px solid #f0c040;'>"
             . "<div style='font-weight:700; font-size:15px; margin-bottom:4px;'>💰 Aktuální inkaso</div>"
             . "<div>Celkem k inkasu: <strong>" . number_format($celkem_poplatek, 2, ',', ' ') . " Kč</strong></div>"
+            . $nevybira_html
             . "</div>";
 
         echo "<div style='$stat_style background:#e8f5e9; border:1px solid #a5d6a7;'>"

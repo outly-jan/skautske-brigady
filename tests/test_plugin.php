@@ -330,6 +330,11 @@ ok(strpos($rn, "data-v='16'>16") !== false && strpos($rn, "data-v='0'>0,00<br><s
 $rs = substr($h, strpos($h, '<td>Svobodovi</td>'), 1200);
 ok(strpos($rs, "data-v='300'>300,00") !== false, 'Roční výpis: ostatní rodina má poplatek 300 Kč');
 ok(strpos($h, 'Celkem k inkasu: <strong>300,00 Kč') !== false, 'souhrn inkasa nezapočítává rodinu vedoucího');
+ok(strpos($h, 'Z toho se v příspěvku 2027 vybere: <strong>300,00 Kč') !== false && strpos($h, 'Nevybírá se: <strong>0,00 Kč') !== false, 'Roční výpis: doplatky se vyberou s příspěvkem 2027');
+update_post_meta(200, 'rodina_archiv', ['od_roku' => 2027, 'poznamka' => '', 'datum' => '2026-11-14']);
+$h2 = sb_rocni_vypis();
+ok(strpos($h2, 'Nevybírá se: <strong>300,00 Kč') !== false && strpos($h2, 'neplatí: Svobodovi (300 Kč)') !== false, 'Roční výpis: doplatek rodiny, která v roce 2027 neplatí, se ukáže jako nevybíraný');
+delete_post_meta(200, 'rodina_archiv');
 $GLOBALS['roles'] = ['rodic']; $GLOBALS['user_id'] = 11; $GLOBALS['logged'] = true; $_POST = [];
 $h = sb_moje_brigady_shortcode();
 $GLOBALS['logged'] = false; $GLOBALS['user_id'] = 0;

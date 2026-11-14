@@ -17,7 +17,7 @@ Plugin umožňuje skautskému středisku sledovat, zda rodiče splnili roční p
 - **Skautský rok**: požadavky se vztahují jen na rodiny vzniklé do 31. 8. daného roku; počet dětí se snímkuje ke konci sezóny (tlačítkem nebo ručně)
 - **Převod hodin nových rodin**: hodiny odpracované v roce vzniku rodiny (po 31. 8.) se převedou do prvního roku s požadavky
 - Evidence skutečně odpracovaných hodin (registrovaní i neregistrovaní walk-in účastníci)
-- Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku a číslováním řádků
+- Roční výpis plnění povinností s řazením dle odpracovaných hodin, požadavku, rozdílu nebo poplatku a číslováním řádků; u inkasa i kolik se vybere s příspěvkem X+1 a kolik ne (rodiny, které v roce X+1 příspěvek neplatí)
 - Export do CSV (roční přehled vč. sloupce s převodem hodin, účastníci konkrétní brigády, prezenční listina)
 - Admin přehled brigád dle rodiny (read-only)
 - **Členské příspěvky**: výpočet příspěvku rodiny (děti × sazba + doplatek za neodpracované brigády předchozího roku), QR platba, sponzorský dar, evidence plateb a splátek, rozesílání e-mailů
